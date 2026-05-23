@@ -19,8 +19,10 @@ class HogPensRequest extends FormRequest
         $rules = [
             'farm_id' => ['required', 'exists:farms,id'],
             'name' => ['required', 'string', 'max:255'],
-            'capacity' => ['required', 'integer', 'min:0'],
-            'status' => ['required', 'integer'],
+            'capacity' => ['sometimes', 'integer', 'min:0'],
+            'status' => ['sometimes', 'integer'],
+            'description' => ['nullable', 'string', 'max:1000'],
+            'imageUrl' => ['nullable', 'url', 'max:2048'],
             'external_provider' => ['nullable', 'string', 'max:255'],
             'external_room_id' => ['nullable', 'string', 'max:255'],
             'external_metadata' => ['nullable', 'array'],
