@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Farms\SyncSinricHomesAction;
 use App\Http\Controllers\Api\V1\Concerns\HandlesCrud;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\FarmsRequest;
@@ -19,7 +20,17 @@ class FarmsController extends Controller
     protected function relationships(): array { return ['hogPens']; }
     protected function ownedParentFields(): array { return ['user_id' => User::class]; }
 
-    public function index(): JsonResponse { return $this->crudIndex(); }
+    public function index(SyncSinricHomesAction $syncSinricHomesAction): JsonResponse
+    {
+        $user = auth()->user();
+
+        if ($user instanceof User) {
+            $syncSinricHomesAction->execute($user);
+        }
+
+        return $this->crudIndex();
+    }
+
     public function store(FarmsRequest $request): JsonResponse { return $this->crudStore($request->validated()); }
     public function show(Farms $farm): JsonResponse { return $this->crudShow($farm); }
     public function update(FarmsRequest $request, Farms $farm): JsonResponse { return $this->crudUpdate($farm, $request->validated()); }

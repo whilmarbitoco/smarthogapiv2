@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Farms;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -29,6 +30,17 @@ class AuthFoundationTest extends TestCase
                     'id' => 'sinric-user-123',
                     'email' => 'owner@example.com',
                     'name' => 'Farm Owner',
+                    'timeZone' => 'Asia/Manila',
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                        'rooms' => [],
+                    ],
                 ],
             ]),
         ]);
@@ -65,6 +77,14 @@ class AuthFoundationTest extends TestCase
         $this->assertSame('sinric-access-token', $user->access_token);
         $this->assertSame('sinric-refresh-token', $user->refresh_token);
         $this->assertNotNull($user->last_login_at);
+
+        $farm = Farms::query()->where('external_home_id', 'sinric-home-123')->firstOrFail();
+
+        $this->assertSame($user->id, $farm->user_id);
+        $this->assertSame('sinric', $farm->external_provider);
+        $this->assertSame('Farm1', $farm->location);
+        $this->assertSame('Asia/Manila', $farm->timezone);
+        $this->assertSame('Farm1', $farm->external_metadata['name']);
     }
 
     public function test_login_rejects_mismatched_sinric_email(): void
@@ -101,6 +121,10 @@ class AuthFoundationTest extends TestCase
                     'email' => 'owner@example.com',
                     'name' => 'Farm Owner',
                 ],
+            ]),
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [],
             ]),
         ]);
 

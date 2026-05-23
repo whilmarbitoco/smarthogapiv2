@@ -2,6 +2,7 @@
 
 namespace App\Actions\Auth;
 
+use App\Actions\Farms\SyncSinricHomesAction;
 use App\DTOs\Auth\LoginData;
 use App\Integrations\SinricPro\SinricAuthClient;
 use Illuminate\Support\Str;
@@ -11,6 +12,7 @@ class LoginWithSinricAction
     public function __construct(
         private SinricAuthClient $sinricAuthClient,
         private SyncSinricUserAction $syncSinricUserAction,
+        private SyncSinricHomesAction $syncSinricHomesAction,
     ) {}
 
     /**
@@ -36,6 +38,8 @@ class LoginWithSinricAction
         }
 
         $user = $this->syncSinricUserAction->execute($profileEmail, $profile, $auth);
+        $this->syncSinricHomesAction->execute($user, $this->profileTimezone($profile));
+
         $token = $user->createToken('sinric-session')->plainTextToken;
 
         return [
@@ -53,5 +57,15 @@ class LoginWithSinricAction
         $email = $profile['email'] ?? $profile['emailAddress'] ?? null;
 
         return is_string($email) && $email !== '' ? $email : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $profile
+     */
+    private function profileTimezone(array $profile): ?string
+    {
+        $timezone = $profile['timeZone'] ?? $profile['timezone'] ?? null;
+
+        return is_string($timezone) && $timezone !== '' ? $timezone : null;
     }
 }
