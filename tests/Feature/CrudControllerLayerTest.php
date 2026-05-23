@@ -209,6 +209,225 @@ class CrudControllerLayerTest extends TestCase
         ]);
     }
 
+    public function test_hog_pen_index_syncs_sinric_rooms_for_authenticated_user(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [
+                    [
+                        'id' => 'sinric-room-123',
+                        'name' => 'Small Cage',
+                        'description' => '2 hog capacity',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                            'name' => 'Farm1',
+                        ],
+                        'devices' => [],
+                    ],
+                    [
+                        'id' => 'sinric-room-456',
+                        'name' => 'sta. felomina',
+                        'description' => '5 hog capacity',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                            'name' => 'Farm1',
+                        ],
+                        'devices' => [],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/hog-pens')
+            ->assertOk()
+            ->assertJsonFragment([
+                'name' => 'Small Cage',
+                'capacity' => 2,
+                'external_provider' => 'sinric',
+                'external_room_id' => 'sinric-room-123',
+            ])
+            ->assertJsonFragment([
+                'name' => 'sta. felomina',
+                'capacity' => 5,
+                'external_provider' => 'sinric',
+                'external_room_id' => 'sinric-room-456',
+            ]);
+
+        $farm = Farms::query()->where('external_home_id', 'sinric-home-123')->firstOrFail();
+
+        $this->assertDatabaseHas('hog_pens', [
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+        $this->assertDatabaseHas('hog_pens', [
+            'farm_id' => $farm->id,
+            'name' => 'sta. felomina',
+            'capacity' => 5,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-456',
+        ]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/rooms'
+                && $request->method() === 'GET'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token');
+        });
+    }
+
+    public function test_repeated_hog_pen_index_sync_updates_sinric_room_without_duplicates(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Old Room Name',
+            'capacity' => 1,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [
+                    [
+                        'id' => 'sinric-room-123',
+                        'name' => 'Small Cage Updated',
+                        'description' => '3 hog capacity',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                        ],
+                    ],
+                ],
+            ]),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/hog-pens')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Small Cage Updated')
+            ->assertJsonPath('data.0.capacity', 3);
+
+        $this->assertDatabaseCount('hog_pens', 1);
+        $this->assertDatabaseHas('hog_pens', [
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage Updated',
+            'capacity' => 3,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+    }
+
+    public function test_sinric_room_sync_remains_scoped_to_authenticated_user(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        $user = User::factory()->create([
+            'access_token' => 'user-sinric-token',
+        ]);
+        $otherUser = User::factory()->create();
+        $otherFarm = Farms::query()->create([
+            'user_id' => $otherUser->id,
+            'location' => 'Other Farm',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        HogPens::query()->create([
+            'farm_id' => $otherFarm->id,
+            'name' => 'Other User Room',
+            'capacity' => 9,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [
+                    [
+                        'id' => 'sinric-room-123',
+                        'name' => 'Small Cage',
+                        'description' => '2 hog capacity',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                        ],
+                    ],
+                ],
+            ]),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/hog-pens')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Small Cage')
+            ->assertJsonMissing(['name' => 'Other User Room']);
+
+        $this->assertDatabaseCount('hog_pens', 2);
+        $this->assertDatabaseHas('hog_pens', [
+            'name' => 'Small Cage',
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+    }
+
     public function test_hog_pen_creation_requires_owned_farm(): void
     {
         $user = User::factory()->create();

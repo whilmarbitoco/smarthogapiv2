@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Farms;
+use App\Models\HogPens;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -40,6 +41,21 @@ class AuthFoundationTest extends TestCase
                         'id' => 'sinric-home-123',
                         'name' => 'Farm1',
                         'rooms' => [],
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [
+                    [
+                        'id' => 'sinric-room-123',
+                        'name' => 'Small Cage',
+                        'description' => '2 hog capacity',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                            'name' => 'Farm1',
+                        ],
+                        'devices' => [],
                     ],
                 ],
             ]),
@@ -85,6 +101,14 @@ class AuthFoundationTest extends TestCase
         $this->assertSame('Farm1', $farm->location);
         $this->assertSame('Asia/Manila', $farm->timezone);
         $this->assertSame('Farm1', $farm->external_metadata['name']);
+
+        $hogPen = HogPens::query()->where('external_room_id', 'sinric-room-123')->firstOrFail();
+
+        $this->assertSame($farm->id, $hogPen->farm_id);
+        $this->assertSame('sinric', $hogPen->external_provider);
+        $this->assertSame('Small Cage', $hogPen->name);
+        $this->assertSame(2, $hogPen->capacity);
+        $this->assertSame(1, $hogPen->status);
     }
 
     public function test_login_rejects_mismatched_sinric_email(): void
@@ -125,6 +149,10 @@ class AuthFoundationTest extends TestCase
             'https://api.sinric.pro/api/v1/homes' => Http::response([
                 'success' => true,
                 'homes' => [],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [],
             ]),
         ]);
 

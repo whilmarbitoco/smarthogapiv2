@@ -2,7 +2,7 @@
 
 namespace App\Actions\Auth;
 
-use App\Actions\Farms\SyncSinricHomesAction;
+use App\Actions\HogPens\SyncSinricRoomsAction;
 use App\DTOs\Auth\LoginData;
 use App\Integrations\SinricPro\SinricAuthClient;
 use Illuminate\Support\Str;
@@ -12,7 +12,7 @@ class LoginWithSinricAction
     public function __construct(
         private SinricAuthClient $sinricAuthClient,
         private SyncSinricUserAction $syncSinricUserAction,
-        private SyncSinricHomesAction $syncSinricHomesAction,
+        private SyncSinricRoomsAction $syncSinricRoomsAction,
     ) {}
 
     /**
@@ -38,7 +38,7 @@ class LoginWithSinricAction
         }
 
         $user = $this->syncSinricUserAction->execute($profileEmail, $profile, $auth);
-        $this->syncSinricHomesAction->execute($user, $this->profileTimezone($profile));
+        $this->syncSinricRoomsAction->execute($user, $this->profileTimezone($profile));
 
         $token = $user->createToken('sinric-session')->plainTextToken;
 
