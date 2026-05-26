@@ -542,6 +542,30 @@ class CrudControllerLayerTest extends TestCase
         ]);
     }
 
+    public function test_hogpens_alias_returns_hog_pen_index(): void
+    {
+        $user = User::factory()->create();
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+        ]);
+
+        HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/hogpens')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Small Cage')
+            ->assertJsonPath('data.0.capacity', 2);
+    }
+
     public function test_sinric_room_sync_remains_scoped_to_authenticated_user(): void
     {
         config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
