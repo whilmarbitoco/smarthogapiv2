@@ -11,14 +11,28 @@ RUN apt-get update && apt-get install -y \
     && docker-php-ext-install pdo_pgsql pgsql zip \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY . .
 
-RUN composer install --optimize-autoloader --no-interaction
+RUN composer install \
+    --no-dev \
+    --optimize-autoloader \
+    --no-interaction
 
-RUN mkdir -p /app/storage/framework/views /app/storage/framework/cache /app/storage/framework/sessions \
-    && chown -R www-data:www-data /app/storage /app/bootstrap/cache
+RUN mkdir -p \
+    storage/framework/views \
+    storage/framework/cache \
+    storage/framework/sessions \
+    storage/logs \
+    bootstrap/cache
+
+RUN chown -R www-data:www-data /app/storage /app/bootstrap/cache
+
+RUN php artisan config:cache || true
+RUN php artisan route:cache || true
+RUN php artisan view:cache || true
 
 EXPOSE 8000
-CMD ["sh", "-c", "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"]
+
+CMD ["sh", "-c", "php artisan migrate --force --graceful && frankenphp run --config /etc/caddy/Caddyfile"]
