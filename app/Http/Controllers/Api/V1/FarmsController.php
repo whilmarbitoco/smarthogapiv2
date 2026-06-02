@@ -108,6 +108,7 @@ public function summary()
 
         $user = auth()->user();
 
+        // updated logic to attempt local deletion if Sinric home deletion fails due to the home not existing or Sinric being unavailable
         if ($user instanceof User && $this->hasSinricToken($user) && $this->isSinricFarm($farm)) {
             $result = $sinricHomesClient->delete($user, (string) $farm->external_home_id);
 
