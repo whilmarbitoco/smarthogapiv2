@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\HogPensController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->group(function (): void {
+    Route::get('/farms-summary', [FarmsController::class, 'summary']);
     Route::apiResource('farms', FarmsController::class)->parameters(['farms' => 'farm']);
     Route::get('hogpens', [HogPensController::class, 'index'])->name('hogpens.index');
     Route::apiResource('hog-pens', HogPensController::class)->parameters(['hog-pens' => 'hogPen']);
