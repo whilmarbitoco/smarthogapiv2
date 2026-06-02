@@ -35,9 +35,9 @@ class FarmsController extends Controller
         ->get();
 
     return response()->json([
-        'success' => true,
-        'data' => FarmSummaryResource::collection($farms),
-    ]);
+    'success' => true,
+    'data' => $farms,
+]);
 }
 
     public function index(SyncSinricHomesAction $syncSinricHomesAction): JsonResponse
