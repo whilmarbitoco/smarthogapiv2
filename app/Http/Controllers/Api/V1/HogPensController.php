@@ -14,6 +14,7 @@ use App\Models\HogPens;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use App\Http\Resources\HogPenSummaryResource;
+use Illuminate\Http\Request;
 
 class HogPensController extends Controller
 {
@@ -35,23 +36,28 @@ class HogPensController extends Controller
     {
         return ['farm_id' => Farms::class];
     }
-    public function summary(): JsonResponse
-    {
-        $hogPens = HogPens::query()
-            ->select([
-                'id',
-                'farm_id',
-                'name',
-                'capacity',
-                'status',
-            ])
-            ->get();
+  public function summary(Request $request): JsonResponse
+{
+    $request->validate([
+        'farm_id' => 'required|integer|exists:farms,id',
+    ]);
 
-        return response()->json([
-            'success' => true,
-            'data' => HogPenSummaryResource::collection($hogPens),
-        ]);
-    }
+    $hogPens = HogPens::query()
+        ->where('farm_id', $request->farm_id)
+        ->select([
+            'id',
+            'farm_id',
+            'name',
+            'capacity',
+            'status',
+        ])
+        ->get();
+
+    return response()->json([
+        'success' => true,
+        'data' => HogPenSummaryResource::collection($hogPens),
+    ]);
+}
     //     public function summary(): JsonResponse
     // {
     //     return response()->json([
