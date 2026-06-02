@@ -23,21 +23,23 @@ class FarmsController extends Controller
     protected function relationships(): array { return ['hogPens']; }
     protected function ownedParentFields(): array { return ['user_id' => User::class]; }
 
-    public function summary(): JsonResponse
+public function summary()
 {
-    $farms = Farms::query()
-        ->select([
-            'id',
-            'user_id',
-            'location',
-            'timezone',
-        ])
-        ->get();
+    $user = auth()->user();
+
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized'
+        ], 401);
+    }
+
+    $farms = Farms::where('user_id', $user->id)->get();
 
     return response()->json([
-    'success' => true,
-    'data' => $farms,
-]);
+        'success' => true,
+        'data' => FarmSummaryResource::collection($farms),
+    ]);
 }
 
     public function index(SyncSinricHomesAction $syncSinricHomesAction): JsonResponse
