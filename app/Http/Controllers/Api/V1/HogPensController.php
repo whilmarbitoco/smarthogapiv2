@@ -13,7 +13,7 @@ use App\Models\Farms;
 use App\Models\HogPens;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
-
+use App\Http\Resources\HogPenSummaryResource;
 class HogPensController extends Controller
 {
     use HandlesCrud;
@@ -22,6 +22,23 @@ class HogPensController extends Controller
     protected function resourceClass(): string { return HogPenResource::class; }
     protected function relationships(): array { return ['farm']; }
     protected function ownedParentFields(): array { return ['farm_id' => Farms::class]; }
+    public function summary(): JsonResponse
+{
+    $hogPens = HogPens::query()
+        ->select([
+            'id',
+            'farm_id',
+            'name',
+            'capacity',
+            'status',
+        ])
+        ->get();
+
+    return response()->json([
+        'success' => true,
+        'data' => HogPenSummaryResource::collection($hogPens),
+    ]);
+}
 
     public function index(SyncSinricRoomsAction $syncSinricRoomsAction): JsonResponse
     {
