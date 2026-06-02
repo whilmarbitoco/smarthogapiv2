@@ -14,31 +14,51 @@ use App\Models\HogPens;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use App\Http\Resources\HogPenSummaryResource;
+
 class HogPensController extends Controller
 {
     use HandlesCrud;
 
-    protected function modelClass(): string { return HogPens::class; }
-    protected function resourceClass(): string { return HogPenResource::class; }
-    protected function relationships(): array { return ['farm']; }
-    protected function ownedParentFields(): array { return ['farm_id' => Farms::class]; }
+    protected function modelClass(): string
+    {
+        return HogPens::class;
+    }
+    protected function resourceClass(): string
+    {
+        return HogPenResource::class;
+    }
+    protected function relationships(): array
+    {
+        return ['farm'];
+    }
+    protected function ownedParentFields(): array
+    {
+        return ['farm_id' => Farms::class];
+    }
     public function summary(): JsonResponse
-{
-    $hogPens = HogPens::query()
-        ->select([
-            'id',
-            'farm_id',
-            'name',
-            'capacity',
-            'status',
-        ])
-        ->get();
+    {
+        $hogPens = HogPens::query()
+            ->select([
+                'id',
+                'farm_id',
+                'name',
+                'capacity',
+                'status',
+            ])
+            ->get();
 
-    return response()->json([
-        'success' => true,
-        'data' => HogPenSummaryResource::collection($hogPens),
-    ]);
-}
+        return response()->json([
+            'success' => true,
+            'data' => HogPenSummaryResource::collection($hogPens),
+        ]);
+    }
+    //     public function summary(): JsonResponse
+    // {
+    //     return response()->json([
+    //         'success' => true,
+    //         'message' => 'test',
+    //     ]);
+    // }
 
     public function index(SyncSinricRoomsAction $syncSinricRoomsAction): JsonResponse
     {
@@ -150,7 +170,7 @@ class HogPensController extends Controller
             $payload['imageUrl'] = $imageUrl;
         }
 
-        return array_filter($payload, fn (mixed $value): bool => is_string($value) && $value !== '');
+        return array_filter($payload, fn(mixed $value): bool => is_string($value) && $value !== '');
     }
 
     /**
