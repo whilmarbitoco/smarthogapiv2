@@ -12,6 +12,7 @@ use App\Integrations\SinricPro\SinricHomesClient;
 use App\Models\Farms;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use App\Http\Resources\FarmSummaryResource;
 
 class FarmsController extends Controller
 {
@@ -21,6 +22,25 @@ class FarmsController extends Controller
     protected function resourceClass(): string { return FarmResource::class; }
     protected function relationships(): array { return ['hogPens']; }
     protected function ownedParentFields(): array { return ['user_id' => User::class]; }
+
+public function summary()
+{
+    $user = auth()->user();
+
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized'
+        ], 401);
+    }
+
+    $farms = Farms::where('user_id', $user->id)->get();
+
+    return response()->json([
+        'success' => true,
+        'data' => FarmSummaryResource::collection($farms),
+    ]);
+}
 
     public function index(SyncSinricHomesAction $syncSinricHomesAction): JsonResponse
     {
