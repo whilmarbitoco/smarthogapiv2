@@ -36,28 +36,24 @@ class HogPensController extends Controller
     {
         return ['farm_id' => Farms::class];
     }
-  public function summary(Request $request): JsonResponse
-{
-    $request->validate([
-        'farm_id' => 'required|integer|exists:farms,id',
-    ]);
+    public function summary($farmId): JsonResponse
+    {
+        $hogPens = HogPens::query()
+            ->where('farm_id', $farmId)
+            ->select([
+                'id',
+                'farm_id',
+                'name',
+                'capacity',
+                'status',
+            ])
+            ->get();
 
-    $hogPens = HogPens::query()
-        ->where('farm_id', $request->farm_id)
-        ->select([
-            'id',
-            'farm_id',
-            'name',
-            'capacity',
-            'status',
-        ])
-        ->get();
-
-    return response()->json([
-        'success' => true,
-        'data' => HogPenSummaryResource::collection($hogPens),
-    ]);
-}
+        return response()->json([
+            'success' => true,
+            'data' => HogPenSummaryResource::collection($hogPens),
+        ]);
+    }
     //     public function summary(): JsonResponse
     // {
     //     return response()->json([
