@@ -92,6 +92,12 @@ class FarmsController extends Controller
             $result = $sinricHomesClient->delete($user, (string) $farm->external_home_id);
 
             if (! ($result['success'] ?? false)) {
+                if ($this->canDeleteFarmLocallyAfterSinricFailure($result)) {
+                    $this->crudDestroy($farm);
+
+                    return ApiResponse::deleted('Farm deleted locally; Sinric home deletion failed or was already unavailable.');
+                }
+
                 return $this->sinricError($result, 'Sinric home deletion failed.');
             }
         }
@@ -221,6 +227,17 @@ class FarmsController extends Controller
         return $farm->external_provider === 'sinric'
             && is_string($farm->external_home_id)
             && $farm->external_home_id !== '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function canDeleteFarmLocallyAfterSinricFailure(array $result): bool
+    {
+        $status = (int) ($result['status'] ?? 0);
+        $message = (string) ($result['message'] ?? '');
+
+        return $status === 404 || $message === 'Sinric homes request failed.';
     }
 
     private function hasSinricToken(User $user): bool

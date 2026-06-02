@@ -255,6 +255,67 @@ class CrudControllerLayerTest extends TestCase
         });
     }
 
+    public function test_farm_destroy_deletes_locally_when_sinric_home_delete_fails_safely(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => false,
+                'message' => 'Sinric homes request failed.',
+            ], 500),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'missing-sinric-home',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/farms/{$farm->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Farm deleted locally; Sinric home deletion failed or was already unavailable.');
+
+        $this->assertDatabaseMissing('farms', ['id' => $farm->id]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/homes'
+                && $request->method() === 'DELETE'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token')
+                && $request['id'] === 'missing-sinric-home';
+        });
+    }
+
+    public function test_farm_destroy_keeps_cross_user_delete_forbidden_for_sinric_farm(): void
+    {
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $otherUser = User::factory()->create();
+        $farm = Farms::query()->create([
+            'user_id' => $otherUser->id,
+            'location' => 'Other Farm',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/farms/{$farm->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('farms', ['id' => $farm->id]);
+        Http::assertNothingSent();
+    }
+
     public function test_farm_index_syncs_sinric_homes_for_authenticated_user(): void
     {
         config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
