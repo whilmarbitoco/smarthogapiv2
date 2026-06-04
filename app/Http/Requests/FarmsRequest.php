@@ -4,11 +4,22 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class FarmsRequest extends FormRequest
 {
     public function authorize(): bool
     {
+        // For POST requests (create), require Sinric token
+        if ($this->isMethod('post')) {
+            $user = auth()->user();
+            if (!$user || !is_string($user->access_token) || $user->access_token === '') {
+                throw ValidationException::withMessages([
+                    'access_token' => 'Sinric access token not configured. Please authenticate with Sinric first.',
+                ]);
+            }
+        }
+
         return true;
     }
 

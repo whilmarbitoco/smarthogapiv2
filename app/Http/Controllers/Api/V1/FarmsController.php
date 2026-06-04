@@ -13,6 +13,7 @@ use App\Integrations\SinricPro\SinricHomesClient;
 use App\Models\Farms;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 
 class FarmsController extends Controller
 {
@@ -59,11 +60,25 @@ public function summary()
         $user = auth()->user();
 
         if ($user instanceof User && $this->hasSinricToken($user)) {
+            Log::info('Creating Sinric home for farm', [
+                'user_id' => $user->id,
+                'payload' => $this->sinricHomePayload($data),
+            ]);
+
             $result = $sinricHomesClient->create($user, $this->sinricHomePayload($data));
 
             if (! ($result['success'] ?? false)) {
+                Log::error('Sinric home creation failed', [
+                    'user_id' => $user->id,
+                    'result' => $result,
+                ]);
                 return $this->sinricError($result, 'Sinric home creation failed.');
             }
+
+            Log::info('Sinric home created successfully', [
+                'user_id' => $user->id,
+                'external_home_id' => $result['home']['id'] ?? null,
+            ]);
 
             $data = $this->mergeSinricHomeData($data, $result);
         }
@@ -86,6 +101,12 @@ public function summary()
         $user = auth()->user();
 
         if ($user instanceof User && $this->hasSinricToken($user) && $this->isSinricFarm($farm)) {
+            Log::info('Updating Sinric home for farm', [
+                'user_id' => $user->id,
+                'farm_id' => $farm->id,
+                'external_home_id' => $farm->external_home_id,
+            ]);
+
             $result = $sinricHomesClient->update(
                 $user,
                 (string) $farm->external_home_id,
@@ -93,6 +114,11 @@ public function summary()
             );
 
             if (! ($result['success'] ?? false)) {
+                Log::error('Sinric home update failed', [
+                    'user_id' => $user->id,
+                    'farm_id' => $farm->id,
+                    'result' => $result,
+                ]);
                 return $this->sinricError($result, 'Sinric home update failed.');
             }
 
@@ -100,12 +126,28 @@ public function summary()
             $home = data_get($freshResult, 'home', data_get($freshResult, 'data.home'));
 
             if (! ($freshResult['success'] ?? false) || ! is_array($home)) {
+                Log::error('Sinric home update verification failed', [
+                    'user_id' => $user->id,
+                    'farm_id' => $farm->id,
+                    'result' => $freshResult,
+                ]);
                 return $this->sinricError($freshResult, 'Sinric home update could not be verified.');
             }
 
             if (! $this->sinricHomeMatchesPayload($home, $this->sinricHomePayload($data, $farm))) {
+                Log::warning('Sinric home payload mismatch after update', [
+                    'user_id' => $user->id,
+                    'farm_id' => $farm->id,
+                    'home' => $home,
+                ]);
                 return ApiResponse::error('Sinric home update could not be verified.', null, 502);
             }
+
+            Log::info('Sinric home updated successfully', [
+                'user_id' => $user->id,
+                'farm_id' => $farm->id,
+                'external_home_id' => $farm->external_home_id,
+            ]);
 
             $data = $this->mergeSinricHomeData($data, ['home' => $home], $farm);
             $data['location'] = $this->homeString($home, ['name']) ?? $farm->location;
@@ -122,9 +164,20 @@ public function summary()
         $user = auth()->user();
 
         if ($user instanceof User && $this->hasSinricToken($user) && $this->isSinricFarm($farm)) {
+            Log::info('Deleting Sinric home for farm', [
+                'user_id' => $user->id,
+                'farm_id' => $farm->id,
+                'external_home_id' => $farm->external_home_id,
+            ]);
+
             $result = $sinricHomesClient->delete($user, (string) $farm->external_home_id);
 
             if (! ($result['success'] ?? false) && ! $this->sinricHomeAlreadyDeleted($result)) {
+                Log::error('Sinric home deletion failed', [
+                    'user_id' => $user->id,
+                    'farm_id' => $farm->id,
+                    'result' => $result,
+                ]);
                 return $this->sinricError($result, 'Sinric home deletion failed.');
             }
 
@@ -133,12 +186,28 @@ public function summary()
 
                 if (! $this->sinricHomeAlreadyDeleted($verification)) {
                     if ($verification['success'] ?? false) {
+                        Log::error('Sinric home still exists after deletion attempt', [
+                            'user_id' => $user->id,
+                            'farm_id' => $farm->id,
+                            'external_home_id' => $farm->external_home_id,
+                        ]);
                         return ApiResponse::error('Sinric home deletion could not be verified.', null, 502);
                     }
 
+                    Log::error('Sinric home deletion verification failed', [
+                        'user_id' => $user->id,
+                        'farm_id' => $farm->id,
+                        'result' => $verification,
+                    ]);
                     return $this->sinricError($verification, 'Sinric home deletion could not be verified.');
                 }
             }
+
+            Log::info('Sinric home deleted successfully', [
+                'user_id' => $user->id,
+                'farm_id' => $farm->id,
+                'external_home_id' => $farm->external_home_id,
+            ]);
         }
 
         return $this->crudDestroy($farm);
