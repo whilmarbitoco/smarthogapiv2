@@ -7,6 +7,7 @@ use App\Models\HogPens;
 use App\Models\IotDevices;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -273,6 +274,185 @@ class CrudControllerLayerTest extends TestCase
                 && $request->method() === 'GET'
                 && $request->hasHeader('Authorization', 'Bearer sinric-access-token');
         });
+    }
+
+    public function test_farm_destroy_deletes_local_farm_when_sinric_verification_returns_unprocessable(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes/sinric-home-123' => Http::sequence()
+                ->push(['success' => true])
+                ->push(['success' => false, 'message' => 'Home not found'], 422),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/farms/{$farm->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Farm deleted successfully');
+
+        $this->assertDatabaseMissing('farms', ['id' => $farm->id]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/homes/sinric-home-123'
+                && $request->method() === 'GET'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token');
+        });
+    }
+
+    public function test_farm_destroy_cascades_local_dependent_rows(): void
+    {
+        $user = User::factory()->create();
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Pen 1',
+            'capacity' => 10,
+            'status' => 1,
+        ]);
+        $hogId = DB::table('hogs')->insertGetId([
+            'hog_pen_id' => $hogPen->id,
+            'ear_tag_id' => 'HOG-1',
+            'breed' => 'Large White',
+            'gender' => 'female',
+            'current_age' => 12,
+            'weight_current' => 45.5,
+        ]);
+        $device = IotDevices::query()->create([
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'switch',
+            'api_provider' => 'local',
+            'status' => 'online',
+        ]);
+        $feederId = DB::table('feeders')->insertGetId([
+            'hog_pen_id' => $hogPen->id,
+            'device_id' => $device->id,
+            'status' => 'active',
+        ]);
+        $sensorId = DB::table('sensors')->insertGetId([
+            'hog_pen_id' => $hogPen->id,
+            'device_id' => $device->id,
+            'sensor_type' => 'temperature',
+            'status' => 'online',
+        ]);
+
+        DB::table('sensor_readings')->insert(['sensor_id' => $sensorId, 'value' => 30.5, 'unit' => 'C']);
+        DB::table('device_logs')->insert(['device_id' => $device->id, 'action' => 'ping', 'response' => 'ok']);
+        DB::table('device_commands')->insert(['iot_device_id' => $device->id, 'action' => 'toggle', 'status' => 'pending']);
+        DB::table('device_credentials')->insert([
+            'user_id' => $user->id,
+            'iot_device_id' => $device->id,
+            'name' => 'Device key',
+            'api_key' => 'api-key-1',
+            'secret' => 'secret',
+        ]);
+        DB::table('feeder_feed_type_mapping')->insert(['feeder_id' => $feederId, 'feed_type' => 'starter']);
+        DB::table('feeding_logs')->insert([
+            'feeder_id' => $feederId,
+            'pen_id' => $hogPen->id,
+            'feed_amount_given' => 2.5,
+            'triggered' => 'manual',
+        ]);
+        DB::table('feeding_queue')->insert([
+            'feeder_id' => $feederId,
+            'hog_pen_id' => $hogPen->id,
+            'feed_type' => 'starter',
+            'scheduled_at' => now(),
+        ]);
+        DB::table('feeding_schedule')->insert([
+            'hog_pen_id' => $hogPen->id,
+            'time' => now(),
+            'feed_amount' => 2.5,
+        ]);
+        DB::table('feeding_predictions')->insert([
+            'hog_pen_id' => $hogPen->id,
+            'ml_model_id' => 1,
+            'predicted_feed_amount' => 2.5,
+            'confidence_score' => 0.8,
+        ]);
+        DB::table('prediction_cache')->insert([
+            'prediction_type' => 'feeding',
+            'pen_id' => $hogPen->id,
+            'cache_key' => 'farm-delete-test',
+            'data' => json_encode(['ok' => true]),
+            'expires_at' => now()->addHour(),
+        ]);
+        DB::table('hog_daily_records')->insert([
+            'hog_id' => $hogId,
+            'hog_pen_id' => $hogPen->id,
+            'weight' => 45.5,
+            'feed_consumed' => 2.5,
+            'health_status' => 'healthy',
+            'temperature' => 38,
+            'activity_level' => 'normal',
+            'notes' => 'ok',
+            'recorded_date' => now(),
+        ]);
+        DB::table('alerts')->insert([
+            'farm_id' => $farm->id,
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'temperature',
+            'message' => 'High temp',
+            'severity' => 'warning',
+            'status' => 'open',
+        ]);
+        DB::table('daily_farm_reports')->insert([
+            'farm_id' => $farm->id,
+            'total_feed_consumed' => 2.5,
+            'total_hogs' => 1,
+            'avg_weight' => 45.5,
+            'mortality_count' => 0,
+            'report_date' => now(),
+        ]);
+        DB::table('webhook_logs')->insert([
+            'url' => 'https://example.com/webhook',
+            'event' => 'farm.test',
+            'payload' => json_encode(['farm_id' => $farm->id]),
+            'status' => 'sent',
+            'farm_id' => $farm->id,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/farms/{$farm->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Farm deleted successfully');
+
+        foreach ([
+            'farms' => $farm->id,
+            'hog_pens' => $hogPen->id,
+            'hogs' => $hogId,
+            'iot_devices' => $device->id,
+            'feeders' => $feederId,
+            'sensors' => $sensorId,
+        ] as $table => $id) {
+            $this->assertDatabaseMissing($table, ['id' => $id]);
+        }
+
+        $this->assertDatabaseMissing('alerts', ['farm_id' => $farm->id]);
+        $this->assertDatabaseMissing('daily_farm_reports', ['farm_id' => $farm->id]);
+        $this->assertDatabaseMissing('webhook_logs', ['farm_id' => $farm->id]);
+        $this->assertDatabaseMissing('feeding_logs', ['pen_id' => $hogPen->id]);
+        $this->assertDatabaseHas('device_credentials', [
+            'user_id' => $user->id,
+            'iot_device_id' => null,
+        ]);
     }
 
     public function test_farm_destroy_keeps_local_farm_when_sinric_home_delete_fails(): void

@@ -13,6 +13,7 @@ use App\Integrations\SinricPro\SinricHomesClient;
 use App\Models\Farms;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class FarmsController extends Controller
@@ -210,7 +211,9 @@ public function summary()
             ]);
         }
 
-        return $this->crudDestroy($farm);
+        $this->deleteFarmLocally($farm);
+
+        return ApiResponse::deleted($this->resourceName().' deleted successfully');
     }
 
     protected function prepareForCreate(array $data): array
@@ -342,7 +345,69 @@ public function summary()
      */
     private function sinricHomeAlreadyDeleted(array $result): bool
     {
-        return (int) ($result['status'] ?? 0) === 404;
+        $status = (int) ($result['status'] ?? 0);
+
+        return in_array($status, [404, 410, 422], true);
+    }
+
+    private function deleteFarmLocally(Farms $farm): void
+    {
+        $this->authorizeOwnedModel($farm);
+
+        DB::transaction(function () use ($farm): void {
+            $penIds = DB::table('hog_pens')
+                ->where('farm_id', $farm->id)
+                ->pluck('id');
+            $hogIds = DB::table('hogs')
+                ->whereIn('hog_pen_id', $penIds)
+                ->pluck('id');
+            $deviceIds = DB::table('iot_devices')
+                ->whereIn('hog_pen_id', $penIds)
+                ->pluck('id');
+            $feederIds = DB::table('feeders')
+                ->whereIn('hog_pen_id', $penIds)
+                ->pluck('id');
+            $sensorIds = DB::table('sensors')
+                ->whereIn('hog_pen_id', $penIds)
+                ->pluck('id');
+
+            DB::table('sensor_readings')->whereIn('sensor_id', $sensorIds)->delete();
+            DB::table('device_logs')->whereIn('device_id', $deviceIds)->delete();
+            DB::table('device_commands')->whereIn('iot_device_id', $deviceIds)->delete();
+            DB::table('device_credentials')->whereIn('iot_device_id', $deviceIds)->update(['iot_device_id' => null]);
+
+            DB::table('feeder_feed_type_mapping')->whereIn('feeder_id', $feederIds)->delete();
+            DB::table('feeding_logs')
+                ->whereIn('feeder_id', $feederIds)
+                ->orWhereIn('pen_id', $penIds)
+                ->delete();
+            DB::table('feeding_queue')
+                ->whereIn('feeder_id', $feederIds)
+                ->orWhereIn('hog_pen_id', $penIds)
+                ->delete();
+
+            DB::table('feeding_schedule')->whereIn('hog_pen_id', $penIds)->delete();
+            DB::table('feeding_predictions')->whereIn('hog_pen_id', $penIds)->delete();
+            DB::table('prediction_cache')->whereIn('pen_id', $penIds)->delete();
+            DB::table('hog_daily_records')
+                ->whereIn('hog_id', $hogIds)
+                ->orWhereIn('hog_pen_id', $penIds)
+                ->delete();
+
+            DB::table('alerts')
+                ->where('farm_id', $farm->id)
+                ->orWhereIn('hog_pen_id', $penIds)
+                ->delete();
+            DB::table('daily_farm_reports')->where('farm_id', $farm->id)->delete();
+            DB::table('webhook_logs')->where('farm_id', $farm->id)->delete();
+            DB::table('sensors')->whereIn('id', $sensorIds)->delete();
+            DB::table('feeders')->whereIn('id', $feederIds)->delete();
+            DB::table('iot_devices')->whereIn('id', $deviceIds)->delete();
+            DB::table('hogs')->whereIn('id', $hogIds)->delete();
+            DB::table('hog_pens')->whereIn('id', $penIds)->delete();
+
+            $farm->delete();
+        });
     }
 
     /**
