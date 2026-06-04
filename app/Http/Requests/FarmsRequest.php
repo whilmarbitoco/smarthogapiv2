@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class FarmsRequest extends FormRequest
 {
@@ -19,7 +20,14 @@ class FarmsRequest extends FormRequest
         $rules = [
             'user_id' => ['sometimes', 'required', 'exists:users,id'],
             'name' => ['sometimes', 'required_without:location', 'string', 'max:255'],
-            'location' => ['required_without:name', 'string', 'max:255'],
+            'location' => [
+                'required_without:name',
+                'string',
+                'max:255',
+                Rule::unique('farms', 'location')
+                    ->where('user_id', auth()->id())
+                    ->ignore($this->route('farm')?->id),
+            ],
             'timezone' => ['sometimes', 'string', 'max:255'],
             'imageUrl' => ['nullable', 'url', 'max:2048'],
             'external_provider' => ['nullable', 'string', 'max:255'],
@@ -39,6 +47,7 @@ class FarmsRequest extends FormRequest
             'user_id.exists' => 'The selected user does not exist.',
             'location.required' => 'The farm location is required.',
             'location.required_without' => 'The farm location is required when a Sinric home name is not provided.',
+            'location.unique' => 'A farm with this location already exists for your account.',
             'name.required_without' => 'The Sinric home name is required when a farm location is not provided.',
             'timezone.required' => 'The farm timezone is required.',
         ];
