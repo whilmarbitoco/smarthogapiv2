@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Farms;
 use Illuminate\Foundation\Http\FormRequest;
 
 class HogPensRequest extends FormRequest
@@ -31,6 +32,29 @@ class HogPensRequest extends FormRequest
         return $this->isMethod('put') || $this->isMethod('patch')
             ? $this->partialRules($rules)
             : $rules;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $homeId = $this->input('homeId', $this->input('home_id'));
+
+        if (! $this->has('farm_id') && is_string($homeId) && $homeId !== '' && auth()->id() !== null) {
+            $farm = Farms::query()
+                ->where('user_id', auth()->id())
+                ->where('external_provider', 'sinric')
+                ->where('external_home_id', $homeId)
+                ->first();
+
+            if ($farm instanceof Farms) {
+                $this->merge(['farm_id' => $farm->id]);
+            }
+        }
+
+        $roomId = $this->input('id', $this->input('roomId', $this->input('room_id')));
+
+        if (! $this->has('external_room_id') && is_string($roomId) && $roomId !== '') {
+            $this->merge(['external_room_id' => $roomId]);
+        }
     }
 
     public function messages(): array

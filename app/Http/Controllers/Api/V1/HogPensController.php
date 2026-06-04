@@ -14,6 +14,7 @@ use App\Models\Farms;
 use App\Models\HogPens;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class HogPensController extends Controller
@@ -149,6 +150,13 @@ class HogPensController extends Controller
         return $this->crudUpdate($hogPen, $this->localHogPenData($data, $hogPen));
     }
 
+    public function updateBySinricRoom(HogPensRequest $request, SinricRoomsClient $sinricRoomsClient): JsonResponse
+    {
+        $hogPen = $this->hogPenFromSinricRoomRequest($request);
+
+        return $this->update($request, $hogPen, $sinricRoomsClient);
+    }
+
     public function destroy(HogPens $hogPen, SinricRoomsClient $sinricRoomsClient): JsonResponse
     {
         $this->authorizeOwnedModel($hogPen);
@@ -170,6 +178,13 @@ class HogPensController extends Controller
         $this->deleteHogPenLocally($hogPen);
 
         return ApiResponse::deleted($this->resourceName().' deleted successfully');
+    }
+
+    public function destroyBySinricRoom(Request $request, SinricRoomsClient $sinricRoomsClient, ?string $roomId = null): JsonResponse
+    {
+        $hogPen = $this->hogPenFromSinricRoomRequest($request, $roomId);
+
+        return $this->destroy($hogPen, $sinricRoomsClient);
     }
 
     /**
@@ -385,6 +400,30 @@ class HogPensController extends Controller
 
             $hogPen->delete();
         });
+    }
+
+    private function hogPenFromSinricRoomRequest(Request $request, ?string $roomId = null): HogPens
+    {
+        $roomId = $roomId
+            ?? $request->input('external_room_id')
+            ?? $request->input('id')
+            ?? $request->input('roomId')
+            ?? $request->input('room_id');
+
+        abort_unless(is_string($roomId) && $roomId !== '', 422, 'The Sinric room ID is required.');
+
+        $hogPen = HogPens::query()
+            ->where('external_provider', 'sinric')
+            ->where('external_room_id', $roomId)
+            ->first();
+
+        if (! $hogPen instanceof HogPens && ctype_digit($roomId)) {
+            $hogPen = HogPens::query()->find($roomId);
+        }
+
+        abort_unless($hogPen instanceof HogPens, 404);
+
+        return $hogPen;
     }
 
     /**
