@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Alerts;
 use App\Models\Farms;
 use App\Models\HogPens;
 use App\Models\IotDevices;
@@ -625,6 +624,84 @@ class CrudControllerLayerTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.name', 'Small Cage')
             ->assertJsonPath('data.0.capacity', 2);
+    }
+
+    public function test_hog_routes_require_authentication(): void
+    {
+        $farm = Farms::query()->create([
+            'user_id' => User::factory()->create()->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+        ]);
+
+        $this->getJson('/api/v1/hogs')
+            ->assertUnauthorized();
+
+        $this->getJson('/api/v1/hog-daily-records')
+            ->assertUnauthorized();
+
+        $this->getJson("/api/v1/farms/{$farm->id}/hog-pens-summary")
+            ->assertUnauthorized();
+    }
+
+    public function test_hog_pen_summary_rejects_cross_user_farm(): void
+    {
+        $user = User::factory()->create();
+        $otherUser = User::factory()->create();
+        $otherFarm = Farms::query()->create([
+            'user_id' => $otherUser->id,
+            'location' => 'Other Farm',
+            'timezone' => 'Asia/Manila',
+        ]);
+
+        HogPens::query()->create([
+            'farm_id' => $otherFarm->id,
+            'name' => 'Other User Room',
+            'capacity' => 9,
+            'status' => 1,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson("/api/v1/farms/{$otherFarm->id}/hog-pens-summary")
+            ->assertForbidden();
+    }
+
+    public function test_hog_pen_summary_returns_owned_farm_pens_only(): void
+    {
+        $user = User::factory()->create();
+        $otherUser = User::factory()->create();
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+        ]);
+        $otherFarm = Farms::query()->create([
+            'user_id' => $otherUser->id,
+            'location' => 'Other Farm',
+            'timezone' => 'Asia/Manila',
+        ]);
+
+        HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+        ]);
+        HogPens::query()->create([
+            'farm_id' => $otherFarm->id,
+            'name' => 'Other User Room',
+            'capacity' => 9,
+            'status' => 1,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson("/api/v1/farms/{$farm->id}/hog-pens-summary")
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Small Cage')
+            ->assertJsonPath('data.0.capacity', 2)
+            ->assertJsonMissing(['name' => 'Other User Room']);
     }
 
     public function test_sinric_room_sync_remains_scoped_to_authenticated_user(): void
