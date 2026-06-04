@@ -43,7 +43,8 @@ return [
     ],
 
     'fastapi' => [
-        'url' => env('FASTAPI_URL', 'https://ml-service-api.vercel.app'),
+        'url' => env('FASTAPI_URL', 'https://machinelearning-ruby.vercel.app'),
+        'api_key' => env('FASTAPI_API_KEY'),
         'timeout' => env('FASTAPI_TIMEOUT', 30),
         'connect_timeout' => env('FASTAPI_CONNECT_TIMEOUT', 5),
         'webhooks' => explode(',', env('FASTAPI_WEBHOOKS', '')),

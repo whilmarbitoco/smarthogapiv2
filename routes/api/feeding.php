@@ -12,5 +12,6 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::apiResource('feeder-feed-type-mapping', FeederFeedTypeMappingController::class)->parameters(['feeder-feed-type-mapping' => 'feederFeedTypeMapping']);
     Route::apiResource('feeding-logs', FeedingLogsController::class)->parameters(['feeding-logs' => 'feedingLog']);
     Route::apiResource('feeding-schedule', FeedingScheduleController::class)->parameters(['feeding-schedule' => 'feedingSchedule']);
+    Route::post('feeding-predictions/generate', [FeedingPredictionsController::class, 'generate']);
     Route::apiResource('feeding-predictions', FeedingPredictionsController::class)->parameters(['feeding-predictions' => 'feedingPrediction']);
 });
