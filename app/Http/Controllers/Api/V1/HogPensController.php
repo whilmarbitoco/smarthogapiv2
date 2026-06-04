@@ -14,6 +14,7 @@ use App\Models\Farms;
 use App\Models\HogPens;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class HogPensController extends Controller
 {
@@ -81,7 +82,11 @@ class HogPensController extends Controller
         $farm = Farms::query()->findOrFail($data['farm_id']);
         $user = auth()->user();
 
-        if ($user instanceof User && $this->hasSinricToken($user) && $this->isSinricFarm($farm)) {
+        if ($this->isSinricFarm($farm)) {
+            if (! ($user instanceof User) || ! $this->hasSinricToken($user)) {
+                return ApiResponse::error('Missing Sinric access token.', null, 422);
+            }
+
             $result = $sinricRoomsClient->create($user, $this->sinricRoomPayload($data, $farm));
 
             if (! ($result['success'] ?? false)) {
@@ -111,22 +116,34 @@ class HogPensController extends Controller
         $farm = $this->targetFarm($hogPen, $data);
         $user = auth()->user();
 
-        if ($user instanceof User && $this->hasSinricToken($user) && $this->isSinricHogPen($hogPen)) {
-            if (! $this->isSinricFarm($farm)) {
-                return ApiResponse::error('The selected farm is not linked to a Sinric home.', null, 422);
+        if ($this->isSinricFarm($farm)) {
+            if (! ($user instanceof User) || ! $this->hasSinricToken($user)) {
+                return ApiResponse::error('Missing Sinric access token.', null, 422);
             }
 
-            $result = $sinricRoomsClient->update(
-                $user,
-                (string) $hogPen->external_room_id,
-                $this->sinricRoomPayload($data, $farm, $hogPen),
-            );
+            if ($this->isSinricHogPen($hogPen)) {
+                $result = $sinricRoomsClient->update(
+                    $user,
+                    (string) $hogPen->external_room_id,
+                    $this->sinricRoomPayload($data, $farm, $hogPen),
+                );
 
-            if (! ($result['success'] ?? false)) {
-                return $this->sinricError($result, 'Sinric room update failed.');
+                if (! ($result['success'] ?? false)) {
+                    return $this->sinricError($result, 'Sinric room update failed.');
+                }
+
+                $data = $this->mergeSinricRoomData($data, $result, $hogPen);
+            } else {
+                $result = $sinricRoomsClient->create($user, $this->sinricRoomPayload($data, $farm, $hogPen));
+
+                if (! ($result['success'] ?? false)) {
+                    return $this->sinricError($result, 'Sinric room creation failed.');
+                }
+
+                $data = $this->mergeSinricRoomData($data, $result, $hogPen);
             }
-
-            $data = $this->mergeSinricRoomData($data, $result, $hogPen);
+        } elseif ($this->isSinricHogPen($hogPen)) {
+            return ApiResponse::error('The selected farm is not linked to a Sinric home.', null, 422);
         }
 
         return $this->crudUpdate($hogPen, $this->localHogPenData($data, $hogPen));
@@ -138,15 +155,21 @@ class HogPensController extends Controller
 
         $user = auth()->user();
 
-        if ($user instanceof User && $this->hasSinricToken($user) && $this->isSinricHogPen($hogPen)) {
+        if ($this->isSinricHogPen($hogPen)) {
+            if (! ($user instanceof User) || ! $this->hasSinricToken($user)) {
+                return ApiResponse::error('Missing Sinric access token.', null, 422);
+            }
+
             $result = $sinricRoomsClient->delete($user, (string) $hogPen->external_room_id);
 
-            if (! ($result['success'] ?? false)) {
+            if (! ($result['success'] ?? false) && ! $this->sinricRoomAlreadyDeleted($result)) {
                 return $this->sinricError($result, 'Sinric room deletion failed.');
             }
         }
 
-        return $this->crudDestroy($hogPen);
+        $this->deleteHogPenLocally($hogPen);
+
+        return ApiResponse::deleted($this->resourceName().' deleted successfully');
     }
 
     /**
@@ -301,6 +324,67 @@ class HogPensController extends Controller
     private function hasSinricToken(User $user): bool
     {
         return is_string($user->access_token) && $user->access_token !== '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function sinricRoomAlreadyDeleted(array $result): bool
+    {
+        $status = (int) ($result['status'] ?? 0);
+
+        return in_array($status, [404, 410, 422], true);
+    }
+
+    private function deleteHogPenLocally(HogPens $hogPen): void
+    {
+        $this->authorizeOwnedModel($hogPen);
+
+        DB::transaction(function () use ($hogPen): void {
+            $deviceIds = DB::table('iot_devices')
+                ->where('hog_pen_id', $hogPen->id)
+                ->pluck('id');
+            $feederIds = DB::table('feeders')
+                ->where('hog_pen_id', $hogPen->id)
+                ->pluck('id');
+            $sensorIds = DB::table('sensors')
+                ->where('hog_pen_id', $hogPen->id)
+                ->pluck('id');
+            $hogIds = DB::table('hogs')
+                ->where('hog_pen_id', $hogPen->id)
+                ->pluck('id');
+
+            DB::table('sensor_readings')->whereIn('sensor_id', $sensorIds)->delete();
+            DB::table('device_logs')->whereIn('device_id', $deviceIds)->delete();
+            DB::table('device_commands')->whereIn('iot_device_id', $deviceIds)->delete();
+            DB::table('device_credentials')->whereIn('iot_device_id', $deviceIds)->update(['iot_device_id' => null]);
+
+            DB::table('feeder_feed_type_mapping')->whereIn('feeder_id', $feederIds)->delete();
+            DB::table('feeding_logs')
+                ->whereIn('feeder_id', $feederIds)
+                ->orWhere('pen_id', $hogPen->id)
+                ->delete();
+            DB::table('feeding_queue')
+                ->whereIn('feeder_id', $feederIds)
+                ->orWhere('hog_pen_id', $hogPen->id)
+                ->delete();
+
+            DB::table('feeding_schedule')->where('hog_pen_id', $hogPen->id)->delete();
+            DB::table('feeding_predictions')->where('hog_pen_id', $hogPen->id)->delete();
+            DB::table('prediction_cache')->where('pen_id', $hogPen->id)->delete();
+            DB::table('hog_daily_records')
+                ->whereIn('hog_id', $hogIds)
+                ->orWhere('hog_pen_id', $hogPen->id)
+                ->delete();
+            DB::table('alerts')->where('hog_pen_id', $hogPen->id)->delete();
+
+            DB::table('sensors')->whereIn('id', $sensorIds)->delete();
+            DB::table('feeders')->whereIn('id', $feederIds)->delete();
+            DB::table('iot_devices')->whereIn('id', $deviceIds)->delete();
+            DB::table('hogs')->whereIn('id', $hogIds)->delete();
+
+            $hogPen->delete();
+        });
     }
 
     /**

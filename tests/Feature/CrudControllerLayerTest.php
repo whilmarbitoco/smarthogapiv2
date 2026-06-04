@@ -1229,6 +1229,44 @@ class CrudControllerLayerTest extends TestCase
         });
     }
 
+    public function test_hog_pen_store_keeps_local_database_empty_when_sinric_room_creation_fails(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => false,
+                'message' => 'Sinric rooms request failed.',
+            ], 500),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/v1/hog-pens', [
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'description' => '2 hog capacity',
+        ])
+            ->assertStatus(500)
+            ->assertJsonPath('message', 'Sinric rooms request failed.');
+
+        $this->assertDatabaseMissing('hog_pens', [
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+        ]);
+    }
+
     public function test_hog_pen_update_updates_linked_sinric_room(): void
     {
         config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
@@ -1295,6 +1333,68 @@ class CrudControllerLayerTest extends TestCase
         });
     }
 
+    public function test_hog_pen_update_creates_sinric_room_for_legacy_local_pen_under_linked_farm(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'room' => [
+                    'id' => 'sinric-room-legacy',
+                    'name' => 'Legacy Pen Updated',
+                    'imageUrl' => 'https://example.com/legacy-room.png',
+                ],
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Legacy Pen',
+            'capacity' => 2,
+            'status' => 1,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->patchJson("/api/v1/hog-pens/{$hogPen->id}", [
+            'name' => 'Legacy Pen Updated',
+            'description' => '4 hog capacity',
+            'imageUrl' => 'https://example.com/legacy-room.png',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Legacy Pen Updated')
+            ->assertJsonPath('data.external_provider', 'sinric')
+            ->assertJsonPath('data.external_room_id', 'sinric-room-legacy');
+
+        $this->assertDatabaseHas('hog_pens', [
+            'id' => $hogPen->id,
+            'name' => 'Legacy Pen Updated',
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-legacy',
+        ]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/rooms'
+                && $request->method() === 'POST'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token')
+                && $request['name'] === 'Legacy Pen Updated'
+                && $request['homeId'] === 'sinric-home-123'
+                && $request['description'] === '4 hog capacity'
+                && $request['imageUrl'] === 'https://example.com/legacy-room.png';
+        });
+    }
+
     public function test_hog_pen_destroy_deletes_linked_sinric_room(): void
     {
         config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
@@ -1337,6 +1437,247 @@ class CrudControllerLayerTest extends TestCase
                 && $request->method() === 'DELETE'
                 && $request->hasHeader('Authorization', 'Bearer sinric-access-token');
         });
+    }
+
+    public function test_hog_pen_destroy_deletes_locally_when_sinric_room_is_already_gone(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/rooms/sinric-room-123' => Http::response([
+                'success' => false,
+                'message' => 'Room not found',
+            ], 422),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/hog-pens/{$hogPen->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Hog Pen deleted successfully');
+
+        $this->assertDatabaseMissing('hog_pens', ['id' => $hogPen->id]);
+    }
+
+    public function test_hog_pen_destroy_keeps_local_pen_when_sinric_room_delete_fails(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/rooms/sinric-room-123' => Http::response([
+                'success' => false,
+                'message' => 'Sinric rooms request failed.',
+            ], 500),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/hog-pens/{$hogPen->id}")
+            ->assertStatus(500)
+            ->assertJsonPath('message', 'Sinric rooms request failed.');
+
+        $this->assertDatabaseHas('hog_pens', ['id' => $hogPen->id]);
+    }
+
+    public function test_hog_pen_destroy_cascades_local_dependent_rows(): void
+    {
+        $user = User::factory()->create();
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+        ]);
+        $hogId = DB::table('hogs')->insertGetId([
+            'hog_pen_id' => $hogPen->id,
+            'ear_tag_id' => 'HOG-PEN-1',
+            'breed' => 'Large White',
+            'gender' => 'female',
+            'current_age' => 12,
+            'weight_current' => 45.5,
+        ]);
+        $device = IotDevices::query()->create([
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'switch',
+            'api_provider' => 'local',
+            'status' => 'online',
+        ]);
+        $feederId = DB::table('feeders')->insertGetId([
+            'hog_pen_id' => $hogPen->id,
+            'device_id' => $device->id,
+            'status' => 'active',
+        ]);
+        $sensorId = DB::table('sensors')->insertGetId([
+            'hog_pen_id' => $hogPen->id,
+            'device_id' => $device->id,
+            'sensor_type' => 'temperature',
+            'status' => 'online',
+        ]);
+
+        DB::table('sensor_readings')->insert(['sensor_id' => $sensorId, 'value' => 30.5, 'unit' => 'C']);
+        DB::table('device_logs')->insert(['device_id' => $device->id, 'action' => 'ping', 'response' => 'ok']);
+        DB::table('device_commands')->insert(['iot_device_id' => $device->id, 'action' => 'toggle', 'status' => 'pending']);
+        DB::table('device_credentials')->insert([
+            'user_id' => $user->id,
+            'iot_device_id' => $device->id,
+            'name' => 'Hog pen device key',
+            'api_key' => 'hog-pen-api-key-1',
+            'secret' => 'secret',
+        ]);
+        DB::table('feeder_feed_type_mapping')->insert(['feeder_id' => $feederId, 'feed_type' => 'starter']);
+        DB::table('feeding_logs')->insert([
+            'feeder_id' => $feederId,
+            'pen_id' => $hogPen->id,
+            'feed_amount_given' => 2.5,
+            'triggered' => 'manual',
+        ]);
+        DB::table('feeding_queue')->insert([
+            'feeder_id' => $feederId,
+            'hog_pen_id' => $hogPen->id,
+            'feed_type' => 'starter',
+            'scheduled_at' => now(),
+        ]);
+        DB::table('feeding_schedule')->insert([
+            'hog_pen_id' => $hogPen->id,
+            'time' => now(),
+            'feed_amount' => 2.5,
+        ]);
+        DB::table('feeding_predictions')->insert([
+            'hog_pen_id' => $hogPen->id,
+            'ml_model_id' => 1,
+            'predicted_feed_amount' => 2.5,
+            'confidence_score' => 0.8,
+        ]);
+        DB::table('prediction_cache')->insert([
+            'prediction_type' => 'feeding',
+            'pen_id' => $hogPen->id,
+            'cache_key' => 'hog-pen-delete-test',
+            'data' => json_encode(['ok' => true]),
+            'expires_at' => now()->addHour(),
+        ]);
+        DB::table('hog_daily_records')->insert([
+            'hog_id' => $hogId,
+            'hog_pen_id' => $hogPen->id,
+            'weight' => 45.5,
+            'feed_consumed' => 2.5,
+            'health_status' => 'healthy',
+            'temperature' => 38,
+            'activity_level' => 'normal',
+            'notes' => 'ok',
+            'recorded_date' => now(),
+        ]);
+        DB::table('alerts')->insert([
+            'farm_id' => $farm->id,
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'temperature',
+            'message' => 'High temp',
+            'severity' => 'warning',
+            'status' => 'open',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/hog-pens/{$hogPen->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Hog Pen deleted successfully');
+
+        foreach ([
+            'hog_pens' => $hogPen->id,
+            'hogs' => $hogId,
+            'iot_devices' => $device->id,
+            'feeders' => $feederId,
+            'sensors' => $sensorId,
+        ] as $table => $id) {
+            $this->assertDatabaseMissing($table, ['id' => $id]);
+        }
+
+        $this->assertDatabaseMissing('alerts', ['hog_pen_id' => $hogPen->id]);
+        $this->assertDatabaseMissing('feeding_logs', ['pen_id' => $hogPen->id]);
+        $this->assertDatabaseHas('device_credentials', [
+            'user_id' => $user->id,
+            'iot_device_id' => null,
+        ]);
+    }
+
+    public function test_hog_pen_update_and_delete_remain_forbidden_for_cross_user_records(): void
+    {
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $otherUser = User::factory()->create();
+        $farm = Farms::query()->create([
+            'user_id' => $otherUser->id,
+            'location' => 'Other Farm',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Other Pen',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->patchJson("/api/v1/hog-pens/{$hogPen->id}", [
+            'name' => 'Wrong Update',
+        ])->assertForbidden();
+
+        $this->deleteJson("/api/v1/hog-pens/{$hogPen->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('hog_pens', [
+            'id' => $hogPen->id,
+            'name' => 'Other Pen',
+        ]);
+        Http::assertNothingSent();
     }
 
     public function test_iot_device_index_syncs_sinric_devices_for_authenticated_user(): void
