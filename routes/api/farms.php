@@ -10,6 +10,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/farms-summary', [FarmsController::class, 'summary']);
     Route::apiResource('farms', FarmsController::class)->parameters(['farms' => 'farm']);
     Route::get('hogpens', [HogPensController::class, 'index'])->name('hogpens.index');
+    Route::apiResource('hogpens', HogPensController::class)->parameters(['hogpens' => 'hogPen'])->except(['index']);
     Route::get('sinric/rooms', [HogPensController::class, 'index'])->name('sinric.rooms.index');
     Route::post('sinric/rooms', [HogPensController::class, 'store'])->name('sinric.rooms.store');
     Route::match(['put', 'patch'], 'sinric/rooms', [HogPensController::class, 'updateBySinricRoom'])->name('sinric.rooms.update');
