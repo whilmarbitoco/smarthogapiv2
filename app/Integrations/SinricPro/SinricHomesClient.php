@@ -90,7 +90,13 @@ class SinricHomesClient
      */
     public function update(User $user, string $homeId, array $data): array
     {
-        return $this->request($user, 'PUT', '/homes', array_merge(['id' => $homeId], $data));
+        $result = $this->request($user, 'PUT', '/homes/'.$homeId, $data);
+
+        if ($this->shouldRetryLegacyEndpoint($result)) {
+            return $this->request($user, 'PUT', '/homes', array_merge(['id' => $homeId], $data));
+        }
+
+        return $result;
     }
 
     /**
@@ -98,7 +104,13 @@ class SinricHomesClient
      */
     public function delete(User $user, string $homeId): array
     {
-        return $this->request($user, 'DELETE', '/homes', ['id' => $homeId]);
+        $result = $this->request($user, 'DELETE', '/homes/'.$homeId);
+
+        if ($this->shouldRetryLegacyEndpoint($result)) {
+            return $this->request($user, 'DELETE', '/homes', ['id' => $homeId]);
+        }
+
+        return $result;
     }
 
     /**
@@ -120,7 +132,7 @@ class SinricHomesClient
         try {
             $pendingRequest = Http::baseUrl((string) config('services.sinric.base_url'))
                 ->acceptJson()
-                ->asForm()
+                ->asJson()
                 ->withToken($accessToken)
                 ->timeout((int) config('services.sinric.timeout'))
                 ->connectTimeout((int) config('services.sinric.connect_timeout'));
@@ -162,5 +174,13 @@ class SinricHomesClient
                 'error' => $exception->getMessage(),
             ];
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function shouldRetryLegacyEndpoint(array $result): bool
+    {
+        return in_array((int) ($result['status'] ?? 0), [404, 405], true);
     }
 }

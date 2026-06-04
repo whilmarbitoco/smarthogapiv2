@@ -7,12 +7,12 @@ use App\Http\Controllers\Api\V1\Concerns\HandlesCrud;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\FarmsRequest;
 use App\Http\Resources\FarmResource;
+use App\Http\Resources\FarmSummaryResource;
 use App\Http\Responses\ApiResponse;
 use App\Integrations\SinricPro\SinricHomesClient;
 use App\Models\Farms;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
-use App\Http\Resources\FarmSummaryResource;
 
 class FarmsController extends Controller
 {
@@ -96,7 +96,20 @@ public function summary()
                 return $this->sinricError($result, 'Sinric home update failed.');
             }
 
-            $data = $this->mergeSinricHomeData($data, $result, $farm);
+            $freshResult = $sinricHomesClient->home($user, (string) $farm->external_home_id);
+            $home = data_get($freshResult, 'home', data_get($freshResult, 'data.home'));
+
+            if (! ($freshResult['success'] ?? false) || ! is_array($home)) {
+                return $this->sinricError($freshResult, 'Sinric home update could not be verified.');
+            }
+
+            if (! $this->sinricHomeMatchesPayload($home, $this->sinricHomePayload($data, $farm))) {
+                return ApiResponse::error('Sinric home update could not be verified.', null, 502);
+            }
+
+            $data = $this->mergeSinricHomeData($data, ['home' => $home], $farm);
+            $data['location'] = $this->homeString($home, ['name']) ?? $farm->location;
+            $data['timezone'] = $this->homeString($home, ['timeZone', 'timezone']) ?? $farm->timezone;
         }
 
         return $this->crudUpdate($farm, $this->localFarmData($data, $farm));
@@ -108,18 +121,23 @@ public function summary()
 
         $user = auth()->user();
 
-        // updated logic to attempt local deletion if Sinric home deletion fails due to the home not existing or Sinric being unavailable
         if ($user instanceof User && $this->hasSinricToken($user) && $this->isSinricFarm($farm)) {
             $result = $sinricHomesClient->delete($user, (string) $farm->external_home_id);
 
-            if (! ($result['success'] ?? false)) {
-                if ($this->canDeleteFarmLocallyAfterSinricFailure($result)) {
-                    $this->crudDestroy($farm);
-
-                    return ApiResponse::deleted('Farm deleted locally; Sinric home deletion failed or was already unavailable.');
-                }
-
+            if (! ($result['success'] ?? false) && ! $this->sinricHomeAlreadyDeleted($result)) {
                 return $this->sinricError($result, 'Sinric home deletion failed.');
+            }
+
+            if (! $this->sinricHomeAlreadyDeleted($result)) {
+                $verification = $sinricHomesClient->home($user, (string) $farm->external_home_id);
+
+                if (! $this->sinricHomeAlreadyDeleted($verification)) {
+                    if ($verification['success'] ?? false) {
+                        return ApiResponse::error('Sinric home deletion could not be verified.', null, 502);
+                    }
+
+                    return $this->sinricError($verification, 'Sinric home deletion could not be verified.');
+                }
             }
         }
 
@@ -253,12 +271,34 @@ public function summary()
     /**
      * @param  array<string, mixed>  $result
      */
-    private function canDeleteFarmLocallyAfterSinricFailure(array $result): bool
+    private function sinricHomeAlreadyDeleted(array $result): bool
     {
-        $status = (int) ($result['status'] ?? 0);
-        $message = (string) ($result['message'] ?? '');
+        return (int) ($result['status'] ?? 0) === 404;
+    }
 
-        return $status === 404 || $message === 'Sinric homes request failed.';
+    /**
+     * @param  array<string, mixed>  $home
+     * @param  array<string, mixed>  $payload
+     */
+    private function sinricHomeMatchesPayload(array $home, array $payload): bool
+    {
+        $name = $payload['name'] ?? null;
+
+        if (is_string($name) && $name !== '' && $this->homeString($home, ['name']) !== $name) {
+            return false;
+        }
+
+        $imageUrl = $payload['imageUrl'] ?? null;
+
+        if (is_string($imageUrl) && $imageUrl !== '') {
+            $homeImageUrl = $this->homeString($home, ['imageUrl', 'image_url']);
+
+            if ($homeImageUrl !== null && $homeImageUrl !== $imageUrl) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function hasSinricToken(User $user): bool
