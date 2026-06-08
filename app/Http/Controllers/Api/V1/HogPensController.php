@@ -256,7 +256,17 @@ class HogPensController extends Controller
             }
         }
 
-        $capacity = $data['capacity'] ?? $hogPen?->capacity ?? $this->capacityFromDescription($data['description'] ?? null);
+        // Only extract capacity from description if there's no existing capacity to preserve
+        if (isset($data['capacity'])) {
+            $capacity = $data['capacity'];
+        } elseif ($hogPen?->capacity !== null && $hogPen->capacity > 0) {
+            // Preserve existing capacity if it's already set
+            $capacity = $hogPen->capacity;
+        } else {
+            // Only extract from description if creating new or no capacity exists
+            $capacity = $this->capacityFromDescription($data['description'] ?? null);
+        }
+
         $status = $data['status'] ?? $hogPen?->status ?? 1;
 
         unset($data['description'], $data['imageUrl']);
