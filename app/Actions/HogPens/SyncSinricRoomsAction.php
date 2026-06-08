@@ -52,18 +52,30 @@ class SyncSinricRoomsAction
                 continue;
             }
 
+            $existingHogPen = HogPens::query()
+                ->where('farm_id', $farm->id)
+                ->where('external_provider', 'sinric')
+                ->where('external_room_id', $roomId)
+                ->first();
+
+            $updateData = [
+                'name' => $this->roomString($room, ['name']) ?? 'Sinric Room '.$roomId,
+                'status' => 1,
+                'external_metadata' => $room,
+            ];
+
+            // Only update capacity if creating new or if existing capacity is not set
+            if (! $existingHogPen instanceof HogPens || $existingHogPen->capacity === 0) {
+                $updateData['capacity'] = $this->capacity($room);
+            }
+
             HogPens::query()->updateOrCreate(
                 [
                     'farm_id' => $farm->id,
                     'external_provider' => 'sinric',
                     'external_room_id' => $roomId,
                 ],
-                [
-                    'name' => $this->roomString($room, ['name']) ?? 'Sinric Room '.$roomId,
-                    'capacity' => $this->capacity($room),
-                    'status' => 1,
-                    'external_metadata' => $room,
-                ],
+                $updateData,
             );
 
             $synced++;
