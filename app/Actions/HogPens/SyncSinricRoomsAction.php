@@ -60,13 +60,16 @@ class SyncSinricRoomsAction
 
             $updateData = [
                 'name' => $this->roomString($room, ['name']) ?? 'Sinric Room '.$roomId,
-                'status' => 1,
                 'external_metadata' => $room,
             ];
 
-            // Only update capacity if creating new or if existing capacity is not set
-            if (! $existingHogPen instanceof HogPens || $existingHogPen->capacity === 0) {
-                $updateData['capacity'] = $this->capacity($room);
+            $roomCapacity = $this->capacity($room);
+
+            if (! $existingHogPen instanceof HogPens) {
+                $updateData['status'] = 1;
+                $updateData['capacity'] = $roomCapacity;
+            } elseif ($roomCapacity > 0) {
+                $updateData['capacity'] = $roomCapacity;
             }
 
             HogPens::query()->updateOrCreate(

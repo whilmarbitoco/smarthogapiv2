@@ -1000,6 +1000,72 @@ class CrudControllerLayerTest extends TestCase
         ]);
     }
 
+    public function test_hog_pen_index_sync_preserves_existing_status(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 0,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [
+                    [
+                        'id' => 'sinric-room-123',
+                        'name' => 'Small Cage Updated',
+                        'description' => '3 hog capacity',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                        ],
+                        'devices' => [],
+                    ],
+                ],
+            ]),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/hog-pens')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Small Cage Updated')
+            ->assertJsonPath('data.0.capacity', 3)
+            ->assertJsonPath('data.0.status', 0);
+
+        $this->assertDatabaseHas('hog_pens', [
+            'farm_id' => $farm->id,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+            'status' => 0,
+        ]);
+    }
+
     public function test_hogpens_alias_returns_hog_pen_index(): void
     {
         $user = User::factory()->create();
