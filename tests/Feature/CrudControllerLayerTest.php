@@ -1066,6 +1066,62 @@ class CrudControllerLayerTest extends TestCase
         ]);
     }
 
+    public function test_sinric_rooms_store_accepts_status_parameter(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'room' => [
+                    'id' => 'sinric-room-new',
+                    'name' => 'Inactive Pen',
+                    'description' => '10 hog capacity',
+                    'home' => ['id' => 'sinric-home-123'],
+                    'devices' => [],
+                ],
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'UTC',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/v1/sinric/rooms', [
+            'name' => 'Inactive Pen',
+            'homeId' => 'sinric-home-123',
+            'description' => '10 hog capacity',
+            'status' => 0,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 0);
+
+        $this->assertDatabaseHas('hog_pens', [
+            'farm_id' => $farm->id,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-new',
+            'status' => 0,
+        ]);
+    }
+
     public function test_hogpens_alias_returns_hog_pen_index(): void
     {
         $user = User::factory()->create();
