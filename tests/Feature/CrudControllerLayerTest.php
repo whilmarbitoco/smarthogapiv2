@@ -16,6 +16,35 @@ class CrudControllerLayerTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_device_action_route_sends_action_to_sinric(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/devices/sinric-device-123/action*' => Http::response([
+                'success' => true,
+                'message' => 'Command sent successfully.',
+            ], 200),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/devices/sinric-device-123/action?clientId=android-app&type=request&createdAt=1550493108338&action=setPowerState&value=' . urlencode('{"state":"On"}'))
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('message', 'Device action sent successfully.');
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/devices/sinric-device-123/action?clientId=android-app&type=request&createdAt=1550493108338&action=setPowerState&value=%7B%22state%22%3A%22On%22%7D'
+                && $request->method() === 'GET'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token');
+        });
+    }
+
     public function test_authenticated_user_can_crud_owned_farm(): void
     {
         $user = User::factory()->create();

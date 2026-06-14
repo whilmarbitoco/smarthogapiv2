@@ -61,6 +61,15 @@ class SinricDevicesClient
     }
 
     /**
+     * @param  array<string, mixed>  $query
+     * @return array<string, mixed>
+     */
+    public function action(User $user, string $deviceId, array $query = []): array
+    {
+        return $this->request($user, 'GET', '/devices/'.$deviceId.'/action', $query);
+    }
+
+    /**
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
@@ -87,7 +96,7 @@ class SinricDevicesClient
 
             $response = match ($method) {
                 'DELETE' => $pendingRequest->delete($endpoint),
-                'GET' => $pendingRequest->get($endpoint),
+                'GET' => $pendingRequest->get($endpoint, $data),
                 'POST' => $pendingRequest->post($endpoint, $data),
                 'PUT' => $pendingRequest->put($endpoint, $data),
                 default => throw new \InvalidArgumentException('Unsupported Sinric devices method.'),

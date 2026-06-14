@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\SensorsController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->group(function (): void {
+    Route::get('devices/{deviceId}/action', [IotDevicesController::class, 'action']);
     Route::apiResource('iot-devices', IotDevicesController::class)->parameters(['iot-devices' => 'iotDevice']);
     Route::apiResource('device-logs', DeviceLogsController::class)->parameters(['device-logs' => 'deviceLog']);
     Route::apiResource('device-credentials', DeviceCredentialsController::class)->parameters(['device-credentials' => 'deviceCredential']);

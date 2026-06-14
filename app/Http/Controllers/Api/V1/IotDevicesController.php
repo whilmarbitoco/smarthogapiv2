@@ -13,6 +13,7 @@ use App\Models\HogPens;
 use App\Models\IotDevices;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class IotDevicesController extends Controller
 {
@@ -91,6 +92,31 @@ class IotDevicesController extends Controller
         }
 
         return $this->crudUpdate($iotDevice, $this->localIotDeviceData($data, $iotDevice));
+    }
+
+    public function action(Request $request, string $deviceId, SinricDevicesClient $sinricDevicesClient): JsonResponse
+    {
+        $user = auth()->user();
+
+        if (! ($user instanceof User)) {
+            return ApiResponse::error('Unauthenticated.', null, 401);
+        }
+
+        if (! $this->hasSinricToken($user)) {
+            return ApiResponse::error('Missing Sinric access token.', null, 422);
+        }
+
+        $result = $sinricDevicesClient->action($user, $deviceId, $request->query());
+
+        if (! ($result['success'] ?? false)) {
+            return ApiResponse::error(
+                (string) data_get($result, 'message', 'Sinric device action failed.'),
+                $result,
+                (int) ($result['status'] ?? 500),
+            );
+        }
+
+        return ApiResponse::success($result, 'Device action sent successfully.');
     }
 
     public function destroy(IotDevices $iotDevice, SinricDevicesClient $sinricDevicesClient): JsonResponse
