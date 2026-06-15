@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\HogBreed;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class FeedingScheduleRequest extends FormRequest
 {
@@ -21,6 +23,7 @@ class FeedingScheduleRequest extends FormRequest
             'time' => ['required', 'date'],
             'feed_amount' => ['required', 'numeric'],
             'feed_type' => ['nullable', 'string', 'max:255'],
+            'breed' => ['required', 'string', Rule::in(HogBreed::values())],
             'mode' => ['sometimes', 'string', 'max:255'],
             'feeding_times' => ['nullable', 'array'],
             'daily_feeding_count' => ['sometimes', 'integer', 'min:1'],

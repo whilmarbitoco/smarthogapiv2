@@ -18,6 +18,7 @@ class FeedingSchedule extends Model
         'time',
         'feed_amount',
         'feed_type',
+        'breed',
         'mode',
         'feeding_times',
         'daily_feeding_count',
