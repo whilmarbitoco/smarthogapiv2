@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\HogBreed;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -14,7 +15,7 @@ class FeedingScheduleRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -25,6 +26,10 @@ class FeedingScheduleRequest extends FormRequest
             'feed_type' => ['nullable', 'string', 'max:255'],
             'breed' => ['required', 'string', Rule::in(HogBreed::values())],
             'mode' => ['sometimes', 'string', 'max:255'],
+            'frequency' => ['sometimes', 'string', 'in:everyday,weekdays,weekends,custom'],
+            'custom_days' => ['nullable', 'array'],
+            'custom_days.*' => ['string'],
+            'is_active' => ['sometimes', 'boolean'],
             'feeding_times' => ['nullable', 'array'],
             'daily_feeding_count' => ['sometimes', 'integer', 'min:1'],
         ];

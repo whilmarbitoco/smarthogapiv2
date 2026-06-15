@@ -73,6 +73,13 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'feeding' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/feeding.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'url' => env('LOG_SLACK_WEBHOOK_URL'),

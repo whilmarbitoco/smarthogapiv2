@@ -8,8 +8,9 @@ use App\Models\Alerts;
 use App\Models\DailyFarmReports;
 use App\Models\Farms;
 use App\Models\FeedingLogs;
-use App\Models\Hogs;
+use App\Models\FeedingSchedule;
 use App\Models\HogPens;
+use App\Models\Hogs;
 use App\Models\IotDevices;
 use App\Models\User;
 use App\Models\WebHookLogs;
@@ -94,12 +95,35 @@ class AnalyticsController extends Controller
         $user = $this->authenticatedUser();
         $feedingLogs = $this->ownedFeedingLogs($user);
         $feedingToday = $feedingLogs->clone()->where('feeding_logs.created_at', '>=', now()->startOfDay());
+        $successfulFeedings = $this->ownedFeedingLogs($user)->where('status', 'success');
+        $failedFeedings = $this->ownedFeedingLogs($user)->where('status', 'failed');
+        $successfulToday = $this->ownedFeedingLogs($user)
+            ->where('status', 'success')
+            ->where('feeding_logs.created_at', '>=', now()->startOfDay());
 
         return ApiResponse::success([
             'log_count' => (int) $feedingLogs->count(),
             'total_feed_amount' => $this->decimalSum($feedingLogs, 'feeding_logs.feed_amount_given'),
             'today_log_count' => (int) $feedingToday->count(),
             'today_total_feed_amount' => $this->decimalSum($feedingToday, 'feeding_logs.feed_amount_given'),
+            'total_feed_dispensed' => $this->decimalSum($successfulFeedings, 'feeding_logs.feed_amount_given'),
+            'daily_feed_consumption' => $this->decimalSum($successfulToday, 'feeding_logs.feed_amount_given'),
+            'weekly_feed_consumption' => $this->decimalSum(
+                $this->ownedFeedingLogs($user)->where('status', 'success')->where('feeding_logs.created_at', '>=', now()->startOfDay()->subDays(6)),
+                'feeding_logs.feed_amount_given'
+            ),
+            'monthly_feed_consumption' => $this->decimalSum(
+                $this->ownedFeedingLogs($user)->where('status', 'success')->where('feeding_logs.created_at', '>=', now()->startOfMonth()),
+                'feeding_logs.feed_amount_given'
+            ),
+            'next_feeding_time' => $this->nextFeedingTime($user),
+            'last_feeding_time' => $this->lastFeedingTime($user),
+            'todays_feedings' => (int) $this->ownedFeedingLogs($user)
+                ->whereDate('feeding_logs.created_at', now()->toDateString())
+                ->count(),
+            'missed_feedings' => $this->missedFeedingsToday($user),
+            'successful_feedings' => (int) $this->ownedFeedingLogs($user)->where('status', 'success')->count(),
+            'failed_feedings' => (int) $failedFeedings->count(),
         ], 'Feeding analytics retrieved successfully.');
     }
 
@@ -180,6 +204,11 @@ class AnalyticsController extends Controller
     private function ownedFeedingLogs(User $user): Builder
     {
         return FeedingLogs::query()->whereHas('hogPen.farm', fn (Builder $query) => $query->where('user_id', $user->id));
+    }
+
+    private function ownedFeedingSchedules(User $user): Builder
+    {
+        return FeedingSchedule::query()->whereHas('hogPen.farm', fn (Builder $query) => $query->where('user_id', $user->id));
     }
 
     private function ownedWebhookLogs(User $user): Builder
@@ -269,5 +298,120 @@ class AnalyticsController extends Controller
     private function decimalSum(Builder $query, string $field): float
     {
         return (float) ($query->sum($field) ?? 0);
+    }
+
+    private function nextFeedingTime(User $user): ?string
+    {
+        $now = now()->seconds(0);
+
+        return $this->ownedFeedingSchedules($user)
+            ->where('is_active', true)
+            ->get()
+            ->flatMap(fn (FeedingSchedule $schedule) => $this->upcomingScheduleTimes($schedule, $now))
+            ->sort()
+            ->first();
+    }
+
+    private function lastFeedingTime(User $user): ?string
+    {
+        $log = $this->ownedFeedingLogs($user)
+            ->where('status', 'success')
+            ->latest('created_at')
+            ->first();
+
+        return $log?->created_at?->toISOString();
+    }
+
+    private function missedFeedingsToday(User $user): int
+    {
+        $now = now()->seconds(0);
+        $today = $now->toDateString();
+
+        return $this->ownedFeedingSchedules($user)
+            ->where('is_active', true)
+            ->get()
+            ->sum(function (FeedingSchedule $schedule) use ($now, $today): int {
+                if (! $this->scheduleRunsOn($schedule, $now)) {
+                    return 0;
+                }
+
+                return collect($this->scheduleTimes($schedule))
+                    ->filter(fn (string $time): bool => Carbon::parse("{$today} {$time}")->lessThan($now))
+                    ->reject(fn (string $time): bool => FeedingLogs::query()
+                        ->where('feeding_schedule_id', $schedule->id)
+                        ->whereDate('feeding_date', $today)
+                        ->where('feeding_time', $time)
+                        ->exists())
+                    ->count();
+            });
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function upcomingScheduleTimes(FeedingSchedule $schedule, Carbon $from): array
+    {
+        $upcoming = [];
+
+        foreach (range(0, 6) as $offset) {
+            $date = $from->copy()->addDays($offset)->startOfDay();
+
+            if (! $this->scheduleRunsOn($schedule, $date)) {
+                continue;
+            }
+
+            foreach ($this->scheduleTimes($schedule) as $time) {
+                $candidate = Carbon::parse($date->toDateString().' '.$time);
+
+                if ($candidate->greaterThanOrEqualTo($from)) {
+                    $upcoming[] = $candidate->toISOString();
+                }
+            }
+        }
+
+        return $upcoming;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function scheduleTimes(FeedingSchedule $schedule): array
+    {
+        $times = $schedule->feeding_times ?: [$schedule->time?->format('H:i')];
+
+        return collect($times)
+            ->filter()
+            ->map(function (mixed $time): ?string {
+                try {
+                    return Carbon::parse((string) $time)->format('H:i');
+                } catch (\Throwable) {
+                    return null;
+                }
+            })
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function scheduleRunsOn(FeedingSchedule $schedule, Carbon $date): bool
+    {
+        return match ($schedule->frequency ?? 'everyday') {
+            'weekdays' => $date->isWeekday(),
+            'weekends' => $date->isWeekend(),
+            'custom' => $this->customScheduleDayMatches($schedule, $date),
+            default => true,
+        };
+    }
+
+    private function customScheduleDayMatches(FeedingSchedule $schedule, Carbon $date): bool
+    {
+        $days = collect($schedule->custom_days ?? [])
+            ->map(fn (mixed $day): string => strtolower((string) $day))
+            ->all();
+
+        return in_array(strtolower($date->englishDayOfWeek), $days, true)
+            || in_array((string) $date->dayOfWeekIso, $days, true)
+            || in_array((string) $date->dayOfWeek, $days, true);
     }
 }

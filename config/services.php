@@ -50,4 +50,20 @@ return [
         'webhooks' => explode(',', env('FASTAPI_WEBHOOKS', '')),
     ],
 
+    'feeding_devices' => [
+        'mqtt' => [
+            'endpoint' => env('FEEDING_MQTT_ENDPOINT'),
+            'topic' => env('FEEDING_MQTT_TOPIC', 'smarthog/feeders/commands'),
+            'token' => env('FEEDING_MQTT_TOKEN'),
+        ],
+        'sinric' => [
+            'endpoint' => env('FEEDING_SINRIC_ENDPOINT'),
+            'token' => env('FEEDING_SINRIC_TOKEN'),
+        ],
+        'http' => [
+            'endpoint' => env('FEEDING_HTTP_ENDPOINT'),
+            'token' => env('FEEDING_HTTP_TOKEN'),
+        ],
+    ],
+
 ];
