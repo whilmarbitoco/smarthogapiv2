@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Farms\SyncSinricHomesAction;
+use App\Actions\HogPens\SyncSinricRoomsAction;
+use App\Actions\IotDevices\SyncSinricDevicesAction;
 use App\Http\Controllers\Api\V1\Concerns\HandlesCrud;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\FarmsRequest;
@@ -43,6 +45,36 @@ public function summary()
         'data' => FarmSummaryResource::collection($farms),
     ]);
 }
+
+    public function syncSinric(
+        SyncSinricHomesAction $syncSinricHomesAction,
+        SyncSinricRoomsAction $syncSinricRoomsAction,
+        SyncSinricDevicesAction $syncSinricDevicesAction,
+    ): JsonResponse {
+        $user = auth()->user();
+
+        if (! ($user instanceof User)) {
+            return ApiResponse::error('Unauthenticated.', null, 401);
+        }
+
+        $homesResult = $syncSinricHomesAction->execute($user);
+        $roomsResult = $syncSinricRoomsAction->execute($user);
+        $devicesResult = $syncSinricDevicesAction->execute($user);
+
+        if (! ($homesResult['success'] ?? false) || ! ($roomsResult['success'] ?? false) || ! ($devicesResult['success'] ?? false)) {
+            return ApiResponse::error('Sinric sync failed.', [
+                'homes' => $homesResult,
+                'rooms' => $roomsResult,
+                'devices' => $devicesResult,
+            ], 502);
+        }
+
+        return ApiResponse::success([
+            'homes' => $homesResult,
+            'rooms' => $roomsResult,
+            'devices' => $devicesResult,
+        ], 'Sinric sync completed successfully.');
+    }
 
     public function index(SyncSinricHomesAction $syncSinricHomesAction): JsonResponse
     {

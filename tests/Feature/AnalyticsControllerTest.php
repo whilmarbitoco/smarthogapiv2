@@ -191,6 +191,34 @@ class AnalyticsControllerTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_analytics_devices_alias_returns_ok_for_authenticated_user(): void
+    {
+        $user = User::factory()->create();
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/analytics/devices')
+            ->assertOk();
+    }
+
+    public function test_analytics_feeding_returns_success_for_authenticated_user(): void
+    {
+        $user = User::factory()->create();
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/analytics/feeding')
+            ->assertOk()
+            ->assertJsonPath('data.log_count', 0)
+            ->assertJsonPath('data.total_feed_amount', 0);
+    }
+
+    public function test_sinric_sync_route_requires_authentication(): void
+    {
+        $this->postJson('/api/v1/sinric/sync', [])
+            ->assertUnauthorized();
+    }
+
     public function test_empty_account_returns_zero_analytics(): void
     {
         $user = User::factory()->create();

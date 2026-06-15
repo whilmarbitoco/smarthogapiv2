@@ -89,6 +89,20 @@ class AnalyticsController extends Controller
         ], 'Device status analytics retrieved successfully.');
     }
 
+    public function feeding(): JsonResponse
+    {
+        $user = $this->authenticatedUser();
+        $feedingLogs = $this->ownedFeedingLogs($user);
+        $feedingToday = $feedingLogs->clone()->where('feeding_logs.created_at', '>=', now()->startOfDay());
+
+        return ApiResponse::success([
+            'log_count' => (int) $feedingLogs->count(),
+            'total_feed_amount' => $this->decimalSum($feedingLogs, 'feeding_logs.feed_amount_given'),
+            'today_log_count' => (int) $feedingToday->count(),
+            'today_total_feed_amount' => $this->decimalSum($feedingToday, 'feeding_logs.feed_amount_given'),
+        ], 'Feeding analytics retrieved successfully.');
+    }
+
     public function farmSummary(Farms $farm): JsonResponse
     {
         $user = $this->authenticatedUser();

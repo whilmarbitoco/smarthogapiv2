@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/farms-summary', [FarmsController::class, 'summary']);
+    Route::post('sinric/sync', [FarmsController::class, 'syncSinric'])->name('sinric.sync');
     Route::apiResource('farms', FarmsController::class)->parameters(['farms' => 'farm']);
     Route::get('hogpens', [HogPensController::class, 'index'])->name('hogpens.index');
     Route::apiResource('hogpens', HogPensController::class)->parameters(['hogpens' => 'hogPen'])->except(['index']);
