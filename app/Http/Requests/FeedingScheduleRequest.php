@@ -31,6 +31,7 @@ class FeedingScheduleRequest extends FormRequest
             'custom_days.*' => ['string'],
             'is_active' => ['sometimes', 'boolean'],
             'feeding_times' => ['nullable', 'array'],
+            'feeding_times.*' => ['date_format:H:i'],
             'daily_feeding_count' => ['sometimes', 'integer', 'min:1'],
         ];
 

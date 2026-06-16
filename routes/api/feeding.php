@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::apiResource('feeders', FeedersController::class)->parameters(['feeders' => 'feeder']);
+    Route::post('feeders/{feeder}/feed', [FeedersController::class, 'feed']);
     Route::apiResource('feeder-feed-type-mapping', FeederFeedTypeMappingController::class)->parameters(['feeder-feed-type-mapping' => 'feederFeedTypeMapping']);
     Route::apiResource('feeding-logs', FeedingLogsController::class)->parameters(['feeding-logs' => 'feedingLog']);
     Route::apiResource('feeding-schedule', FeedingScheduleController::class)->parameters(['feeding-schedule' => 'feedingSchedule']);
