@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\DeviceCommandService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
 use RuntimeException;
@@ -134,6 +135,68 @@ class AutomatedFeedingSchedulerTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2026-06-16 06:00:00'));
 
         $graph = $this->createFarmGraph(deviceStatus: 'offline');
+        $schedule = FeedingSchedule::query()->create([
+            'hog_pen_id' => $graph['pen']->id,
+            'time' => '2026-06-16 06:00:00',
+            'feed_amount' => 3.25,
+            'mode' => 'auto',
+            'frequency' => 'everyday',
+            'is_active' => true,
+        ]);
+
+        $this->expectException(RuntimeException::class);
+
+        try {
+            (new ExecuteFeedingJob($schedule->id, '2026-06-16', '06:00'))->handle(app(DeviceCommandService::class));
+        } finally {
+            $this->assertDatabaseHas('feeding_logs', [
+                'feeding_schedule_id' => $schedule->id,
+                'device_id' => $graph['device']->id,
+                'status' => 'failed',
+                'trigger_source' => 'scheduled',
+                'error_message' => 'Feeding device is offline.',
+            ]);
+            $this->assertDatabaseHas('alerts', [
+                'farm_id' => $graph['farm']->id,
+                'type' => 'scheduled_feeding',
+                'message' => 'Scheduled feeding failed',
+            ]);
+        }
+    }
+
+    public function test_send_feed_command_throws_when_no_device_provider_is_configured(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-16 06:00:00'));
+
+        Config::set('services.feeding_devices.mqtt.endpoint', null);
+        Config::set('services.feeding_devices.sinric.endpoint', null);
+        Config::set('services.feeding_devices.http.endpoint', null);
+
+        $graph = $this->createFarmGraph();
+        $device = $graph['device'];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('No device provider configured for feed command.');
+
+        try {
+            app(DeviceCommandService::class)->sendFeedCommand((string) $device->id, 1.5);
+        } finally {
+            $this->assertDatabaseCount('device_commands', 0);
+        }
+    }
+
+    public function test_execute_job_prefers_sinric_metadata_when_device_status_is_mismatched(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-16 06:00:00'));
+
+        $graph = $this->createFarmGraph(deviceStatus: 'online');
+        $graph['device']->update([
+            'external_provider' => 'sinric',
+            'external_metadata' => [
+                'isOnline' => false,
+            ],
+        ]);
+
         $schedule = FeedingSchedule::query()->create([
             'hog_pen_id' => $graph['pen']->id,
             'time' => '2026-06-16 06:00:00',

@@ -28,6 +28,20 @@ class IotDevices extends Model
         'external_metadata' => 'array',
     ];
 
+    public function isOnline(): bool
+    {
+        if ($this->external_provider === 'sinric') {
+            $sinricOnline = data_get($this->external_metadata, 'isOnline');
+
+            if ($sinricOnline !== null) {
+                return $sinricOnline === true;
+            }
+        }
+
+        return $this->status === 'online'
+            && data_get($this->external_metadata, 'isOnline', true) !== false;
+    }
+
     public function hogPen(): BelongsTo
     {
         return $this->belongsTo(HogPens::class, 'hog_pen_id');

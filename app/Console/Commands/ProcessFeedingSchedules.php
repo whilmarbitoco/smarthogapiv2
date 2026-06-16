@@ -70,7 +70,7 @@ class ProcessFeedingSchedules extends Command
         $currentTime = $now->format('H:i');
 
         return collect($this->scheduledTimes($schedule))
-            ->filter(fn (string $time): bool => $time === $currentTime)
+            ->filter(fn (string $time): bool => $time > $lastDispatchedTime && $time <= $currentTime)
             ->values()
             ->all();
     }
@@ -124,6 +124,7 @@ class ProcessFeedingSchedules extends Command
             ->where('feeding_schedule_id', $scheduleId)
             ->whereDate('feeding_date', $date)
             ->where('feeding_time', $feedingTime)
+            ->whereIn('status', ['success', 'processing'])
             ->exists();
     }
 }
