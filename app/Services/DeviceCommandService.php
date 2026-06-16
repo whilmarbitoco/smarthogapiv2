@@ -2,13 +2,18 @@
 
 namespace App\Services;
 
+use App\Integrations\SinricPro\SinricDevicesClient;
 use App\Models\DeviceCommands;
 use App\Models\IotDevices;
+use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 class DeviceCommandService
 {
+    public function __construct(
+        private SinricDevicesClient $sinricDevicesClient,
+    ) {}
     /**
      * @return array{provider: string, command_id: int}
      */
@@ -71,6 +76,10 @@ class DeviceCommandService
             return 'mqtt';
         }
 
+        if ($device->external_provider === 'sinric') {
+            return 'sinric';
+        }
+
         if (config('services.feeding_devices.sinric.endpoint')) {
             return 'sinric';
         }
@@ -99,6 +108,10 @@ class DeviceCommandService
             return 'mqtt';
         }
 
+        if ($device->external_provider === 'sinric') {
+            return $this->sendViaSinric($device, $payload);
+        }
+
         if ($endpoint = config('services.feeding_devices.sinric.endpoint')) {
             $this->postCommand($endpoint, $payload, config('services.feeding_devices.sinric.token'));
 
@@ -115,6 +128,27 @@ class DeviceCommandService
         }
 
         throw new RuntimeException('No device provider configured for feed command.');
+    }
+
+    private function sendViaSinric(IotDevices $device, array $payload): string
+    {
+        $user = $device->hogPen?->farm?->user;
+
+        if (! $user instanceof User) {
+            throw new RuntimeException('Sinric device owner is not available.');
+        }
+
+        $result = $this->sinricDevicesClient->action($user, (string) $device->external_device_id, [
+            'action' => 'feed',
+            'feed_quantity' => $payload['feed_quantity'],
+            'requested_at' => $payload['requested_at'],
+        ]);
+
+        if (! ($result['success'] ?? false)) {
+            throw new RuntimeException(data_get($result, 'message', 'Sinric device action failed.'));
+        }
+
+        return 'sinric';
     }
 
     /**

@@ -10,6 +10,7 @@ use App\Models\FeedingSchedule;
 use App\Models\HogPens;
 use App\Models\IotDevices;
 use App\Models\User;
+use App\Integrations\SinricPro\SinricDevicesClient;
 use App\Services\DeviceCommandService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -224,6 +225,63 @@ class AutomatedFeedingSchedulerTest extends TestCase
                 'message' => 'Scheduled feeding failed',
             ]);
         }
+    }
+
+    public function test_send_feed_command_uses_sinric_action_for_sinric_linked_device(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-16 06:00:00'));
+
+        $user = User::factory()->create();
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+        ]);
+        $pen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Grower Pen',
+            'capacity' => 10,
+            'status' => 1,
+        ]);
+        $device = IotDevices::query()->create([
+            'hog_pen_id' => $pen->id,
+            'type' => 'feeder',
+            'api_provider' => 'sinric',
+            'external_provider' => 'sinric',
+            'status' => 'online',
+            'external_device_id' => 'sinric-device-123',
+            'external_metadata' => [
+                'isOnline' => true,
+            ],
+        ]);
+        Feeders::query()->create([
+            'hog_pen_id' => $pen->id,
+            'device_id' => $device->id,
+            'status' => 'active',
+        ]);
+
+        $sinricClient = Mockery::mock(SinricDevicesClient::class);
+        $sinricClient->shouldReceive('action')
+            ->once()
+            ->with(
+                Mockery::on(fn ($value): bool => $value instanceof User && $value->id === $user->id),
+                'sinric-device-123',
+                Mockery::on(fn (array $payload): bool =>
+                    $payload['action'] === 'feed'
+                    && $payload['feed_quantity'] === 1.5
+                ),
+            )
+            ->andReturn(['success' => true, 'status' => 200]);
+
+        $this->app->instance(SinricDevicesClient::class, $sinricClient);
+
+        $result = app(DeviceCommandService::class)->sendFeedCommand((string) $device->id, 1.5);
+
+        $this->assertSame('sinric', $result['provider']);
+        $this->assertDatabaseHas('device_commands', [
+            'iot_device_id' => $device->id,
+            'status' => 'completed',
+        ]);
     }
 
     public function test_feeding_analytics_exposes_scheduler_dashboard_fields(): void
