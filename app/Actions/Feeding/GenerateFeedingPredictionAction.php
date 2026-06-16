@@ -90,8 +90,8 @@ class GenerateFeedingPredictionAction
 
         $mlModel = MlModels::query()->firstOrCreate(
             [
-                'model_name' => 'smarthog_flask_service',
-                'version' => 'v1',
+                'model_name' => 'smarthog_ml_service',
+                'version' => $response['data']['model_version'] ?? '1.0.0',
             ],
             ['accuracy_score' => 0]
         );
@@ -99,28 +99,38 @@ class GenerateFeedingPredictionAction
         $feedTotals = $this->feedTotals($results);
         $weightTrend = $this->weightTrend($results);
         $feedRecommendation = [
-            'source' => 'ml_service',
+            'source' => $response['data']['summary']['model_source'] ?? 'ml_service',
             'pigs' => $results,
         ];
+
+        // Extract warnings and suggestions from per-pig results
+        $allWarnings = [];
+        $allSuggestions = [];
+        foreach ($results as $r) {
+            if (!empty($r['warnings'])) {
+                $allWarnings = array_merge($allWarnings, $r['warnings']);
+            }
+        }
 
         $prediction = FeedingPredictions::query()->create([
             'hog_pen_id' => $hogPen->id,
             'ml_model_id' => $mlModel->id,
             'predicted_feed_amount' => $feedTotals['total_recommended_feed_kg'],
-            'confidence_score' => 0,
-            'model_used' => 'smarthog_flask_service:v1',
-            'confidence_level' => 'unavailable',
-            'confidence_reason' => 'The ML service response does not include a confidence score.',
+            'confidence_score' => $results[0]['confidence_score'] ?? 0,
+            'model_used' => 'smarthog_ml_service:' . ($response['data']['model_version'] ?? '1.0.0'),
+            'confidence_level' => $results[0]['confidence_level'] ?? 'medium',
+            'confidence_reason' => $this->confidenceReason($results, $response['data']['summary']['model_source'] ?? 'rule_based'),
             'feed_recommendation' => $feedRecommendation,
             'feed_totals' => $feedTotals,
             'weight_trend' => $weightTrend,
             'pen_status' => [
                 'hog_pen_id' => $hogPen->id,
                 'hog_count' => $hogPen->hogs->count(),
+                'model_source' => $response['data']['summary']['model_source'] ?? 'rule_based',
             ],
-            'warnings' => [],
+            'warnings' => array_unique($allWarnings),
             'alerts' => [],
-            'suggestions' => [],
+            'suggestions' => $allSuggestions,
             'fastapi_response' => $results,
             'predicted_at' => now(),
         ])->load(['hogPen', 'mlModel']);
@@ -153,6 +163,14 @@ class GenerateFeedingPredictionAction
             'data' => $data,
             'message' => 'Feeding prediction generated successfully.',
         ];
+    }
+
+    private function confidenceReason(array $results, string $source): string
+    {
+        if ($source === 'ml') {
+            return 'Prediction based on trained ML model using farm-specific data.';
+        }
+        return 'Prediction based on industry-standard rules. Train the model with farm data for improved accuracy.';
     }
 
     /**
@@ -234,7 +252,7 @@ class GenerateFeedingPredictionAction
      */
     private function cacheKey(HogPens $hogPen, array $payload, array $context): string
     {
-        return 'feeding:'.sha1(json_encode([
+        return 'feeding:' . sha1(json_encode([
             'pen_id' => $hogPen->id,
             'pigs' => $payload['pigs'],
             'context' => $context,
@@ -246,11 +264,21 @@ class GenerateFeedingPredictionAction
      */
     private function predictionResults(mixed $data): array
     {
-        if (! is_array($data) || ! array_is_list($data)) {
+        if (!is_array($data)) {
             return [];
         }
 
-        return array_values(array_filter($data, fn (mixed $result): bool => is_array($result)));
+        // New format: data contains 'predictions' key
+        if (isset($data['predictions']) && is_array($data['predictions'])) {
+            return array_values(array_filter($data['predictions'], fn($r) => is_array($r)));
+        }
+
+        // Legacy format: flat list
+        if (array_is_list($data)) {
+            return array_values(array_filter($data, fn($r) => is_array($r)));
+        }
+
+        return [];
     }
 
     /**
@@ -260,7 +288,7 @@ class GenerateFeedingPredictionAction
     private function feedTotals(array $results): array
     {
         $total = array_sum(array_map(
-            fn (array $result): float => (float) ($result['recommended_feed_kg'] ?? 0),
+            fn(array $result): float => (float) ($result['recommended_feed_kg'] ?? 0),
             $results
         ));
         $count = count($results);
@@ -279,17 +307,17 @@ class GenerateFeedingPredictionAction
     private function weightTrend(array $results): array
     {
         $weights = array_values(array_filter(array_map(
-            fn (array $result): ?float => isset($result['predicted_weight_kg'])
+            fn(array $result): ?float => isset($result['predicted_weight_kg'])
                 ? (float) $result['predicted_weight_kg']
                 : null,
             $results
-        ), fn (?float $weight): bool => $weight !== null));
+        ), fn(?float $weight): bool => $weight !== null));
 
         return [
             'average_predicted_weight_kg' => $weights !== []
                 ? round(array_sum($weights) / count($weights), 2)
                 : null,
-            'pigs' => array_map(fn (array $result): array => [
+            'pigs' => array_map(fn(array $result): array => [
                 'pig_id' => $result['pig_id'] ?? null,
                 'predicted_weight_kg' => $result['predicted_weight_kg'] ?? null,
                 'predicted_growth_stage' => $result['predicted_growth_stage'] ?? null,
