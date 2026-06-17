@@ -66,7 +66,7 @@ class SinricDevicesClient
      */
     public function action(User $user, string $deviceId, array $query = []): array
     {
-        return $this->request($user, 'GET', '/devices/'.$deviceId.'/action', $query);
+        return $this->request($user, 'POST', '/devices/'.$deviceId.'/action', $query);
     }
 
     /**

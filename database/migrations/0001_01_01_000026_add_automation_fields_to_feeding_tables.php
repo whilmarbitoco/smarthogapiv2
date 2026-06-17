@@ -9,22 +9,22 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('feeding_schedule', function (Blueprint $table): void {
-            $table->string('frequency')->default('everyday')->after('mode');
-            $table->json('custom_days')->nullable()->after('frequency');
-            $table->boolean('is_active')->default(true)->after('custom_days');
-            $table->timestamp('last_dispatched_at', 0)->nullable()->after('daily_feeding_count');
+            $table->string('frequency')->default('everyday');
+            $table->json('custom_days')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->timestamp('last_dispatched_at', 0)->nullable();
 
             $table->index(['is_active', 'frequency']);
         });
 
         Schema::table('feeding_logs', function (Blueprint $table): void {
-            $table->foreignId('feeding_schedule_id')->nullable()->after('id')->constrained('feeding_schedule')->nullOnDelete();
-            $table->foreignId('device_id')->nullable()->after('feeding_schedule_id')->constrained('iot_devices')->nullOnDelete();
-            $table->date('feeding_date')->nullable()->after('feed_amount_given');
-            $table->time('feeding_time', 0)->nullable()->after('feeding_date');
-            $table->string('status')->default('success')->after('feeding_time');
-            $table->string('trigger_source')->default('manual')->after('status');
-            $table->text('error_message')->nullable()->after('trigger_source');
+            $table->foreignId('feeding_schedule_id')->nullable()->constrained('feeding_schedule')->nullOnDelete();
+            $table->foreignId('device_id')->nullable()->constrained('iot_devices')->nullOnDelete();
+            $table->date('feeding_date')->nullable();
+            $table->time('feeding_time', 0)->nullable();
+            $table->string('status')->default('success');
+            $table->string('trigger_source')->default('manual');
+            $table->text('error_message')->nullable();
 
             $table->unique(['feeding_schedule_id', 'feeding_date', 'feeding_time'], 'feeding_logs_schedule_date_time_unique');
             $table->index(['status', 'feeding_date']);

@@ -62,7 +62,7 @@ class ExecuteFeedingJob implements ShouldQueue
                 throw new RuntimeException('No feeder device is associated with this feeding schedule.');
             }
 
-            if (! $this->deviceIsOnline($device)) {
+            if (! $device->isOnline()) {
                 throw new RuntimeException('Feeding device is offline.');
             }
 
@@ -115,12 +115,6 @@ class ExecuteFeedingJob implements ShouldQueue
         return $schedule->hogPen?->feeders
             ->first(fn (Feeders $feeder): bool => $feeder->status === 'active')
             ?? $schedule->hogPen?->feeders->first();
-    }
-
-    private function deviceIsOnline(IotDevices $device): bool
-    {
-        return $device->status === 'online'
-            && data_get($device->external_metadata, 'isOnline', true) !== false;
     }
 
     private function recordFailure(FeedingSchedule $schedule, Feeders $feeder, ?IotDevices $device, Throwable $exception): void

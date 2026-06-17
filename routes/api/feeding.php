@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\FeedingScheduleController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->group(function (): void {
+    Route::post('feeders/{feeder}/feed', [FeedersController::class, 'feed']);
     Route::apiResource('feeders', FeedersController::class)->parameters(['feeders' => 'feeder']);
     Route::post('feeders/{feeder}/feed', [FeedersController::class, 'feed']);
     Route::apiResource('feeder-feed-type-mapping', FeederFeedTypeMappingController::class)->parameters(['feeder-feed-type-mapping' => 'feederFeedTypeMapping']);

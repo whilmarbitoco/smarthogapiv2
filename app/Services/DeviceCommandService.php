@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Integrations\SinricPro\SinricDevicesClient;
 use App\Models\DeviceCommands;
 use App\Models\IotDevices;
+use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -33,6 +34,8 @@ class DeviceCommandService
             'requested_at' => now()->toISOString(),
         ];
 
+        $provider = $this->resolveBestAvailableProvider($device, $payload);
+
         $command = DeviceCommands::query()->create([
             'iot_device_id' => $device->id,
             'action' => 'feed',
@@ -41,7 +44,7 @@ class DeviceCommandService
         ]);
 
         try {
-            $provider = $this->sendViaBestAvailableProvider($device, $payload);
+            $this->sendViaBestAvailableProvider($device, $payload);
 
             $command->update([
                 'payload' => array_merge($payload, ['provider' => $provider]),
@@ -64,6 +67,30 @@ class DeviceCommandService
 
             throw $exception;
         }
+    }
+
+    private function resolveBestAvailableProvider(IotDevices $device, array $payload): string
+    {
+        if (config('services.feeding_devices.mqtt.endpoint')) {
+            return 'mqtt';
+        }
+
+        if ($device->external_provider === 'sinric') {
+            return 'sinric';
+        }
+
+        if (config('services.feeding_devices.sinric.endpoint')) {
+            return 'sinric';
+        }
+
+        $deviceEndpoint = data_get($device->external_metadata, 'command_url')
+            ?? config('services.feeding_devices.http.endpoint');
+
+        if ($deviceEndpoint) {
+            return 'http';
+        }
+
+        throw new RuntimeException('No device provider configured for feed command.');
     }
 
     /**
