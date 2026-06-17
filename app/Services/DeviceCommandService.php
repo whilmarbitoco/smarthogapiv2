@@ -140,9 +140,9 @@ class DeviceCommandService
      */
     private function sendViaSinric(IotDevices $device, array $payload): void
     {
-        $user = $device->user;
+        $user = $device->hogPen?->farm?->user;
 
-        if (! $user) {
+        if (! $user instanceof User) {
             throw new RuntimeException("Device [{$device->id}] has no associated user for SinricPro command.");
         }
 
@@ -153,8 +153,9 @@ class DeviceCommandService
         }
 
         $result = $this->sinricDevicesClient->action($user, (string) $externalDeviceId, [
-            'action' => 'setPowerState',
-            'value' => 'on',
+            'action' => 'feed',
+            'feed_quantity' => $payload['feed_quantity'],
+            'requested_at' => $payload['requested_at'],
         ]);
 
         if (! ($result['success'] ?? false)) {
