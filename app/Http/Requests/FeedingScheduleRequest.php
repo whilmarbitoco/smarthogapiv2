@@ -80,7 +80,7 @@ class FeedingScheduleRequest extends FormRequest
             }
         }
 
-        return $normalized ?: null;
+        return array_values(array_unique($normalized)) ?: null;
     }
 
     public function messages(): array
