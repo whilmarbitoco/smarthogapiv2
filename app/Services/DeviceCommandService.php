@@ -11,9 +11,8 @@ use RuntimeException;
 
 class DeviceCommandService
 {
-    public function __construct(
-        private SinricDevicesClient $sinricDevicesClient,
-    ) {}
+    public function __construct(private SinricDevicesClient $sinricDevicesClient) {}
+
     /**
      * @return array{provider: string, command_id: int}
      */
@@ -108,8 +107,10 @@ class DeviceCommandService
             return 'mqtt';
         }
 
-        if ($device->external_provider === 'sinric') {
-            return $this->sendViaSinric($device, $payload);
+        if ($this->isSinricDevice($device)) {
+            $this->sendViaSinric($device, $payload);
+
+            return 'sinric';
         }
 
         if ($endpoint = config('services.feeding_devices.sinric.endpoint')) {
@@ -127,28 +128,47 @@ class DeviceCommandService
             return 'http';
         }
 
-        throw new RuntimeException('No device provider configured for feed command.');
+        throw new RuntimeException(
+            "No command provider available for device [{$device->id}]. " .
+            "Configure FEEDING_MQTT_ENDPOINT, FEEDING_SINRIC_ENDPOINT, or FEEDING_HTTP_ENDPOINT, " .
+            "or attach the device to SinricPro."
+        );
     }
 
-    private function sendViaSinric(IotDevices $device, array $payload): string
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function sendViaSinric(IotDevices $device, array $payload): void
     {
-        $user = $device->hogPen?->farm?->user;
+        $user = $device->user;
 
-        if (! $user instanceof User) {
-            throw new RuntimeException('Sinric device owner is not available.');
+        if (! $user) {
+            throw new RuntimeException("Device [{$device->id}] has no associated user for SinricPro command.");
         }
 
-        $result = $this->sinricDevicesClient->action($user, (string) $device->external_device_id, [
-            'action' => 'feed',
-            'feed_quantity' => $payload['feed_quantity'],
-            'requested_at' => $payload['requested_at'],
+        $externalDeviceId = $device->external_device_id;
+
+        if (! is_string($externalDeviceId) || $externalDeviceId === '') {
+            throw new RuntimeException("Device [{$device->id}] is missing external_device_id for SinricPro command.");
+        }
+
+        $result = $this->sinricDevicesClient->action($user, (string) $externalDeviceId, [
+            'action' => 'setPowerState',
+            'value' => 'on',
         ]);
 
         if (! ($result['success'] ?? false)) {
-            throw new RuntimeException(data_get($result, 'message', 'Sinric device action failed.'));
+            throw new RuntimeException(
+                data_get($result, 'message', 'SinricPro device command failed.')
+            );
         }
+    }
 
-        return 'sinric';
+    private function isSinricDevice(IotDevices $device): bool
+    {
+        return $device->external_provider === 'sinric'
+            && is_string($device->external_device_id)
+            && $device->external_device_id !== '';
     }
 
     /**

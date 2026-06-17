@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class FeedingQueueRequest extends FormRequest
@@ -12,45 +13,21 @@ class FeedingQueueRequest extends FormRequest
     }
 
     /**
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
-        $rules = [
-            'feeder_id' => ['required', 'exists:feeders,id'],
-            'hog_pen_id' => ['required', 'exists:hog_pens,id'],
-            'feed_type' => ['required', 'string', 'max:255'],
-            'scheduled_at' => ['required', 'date'],
-            'actual_feed_time' => ['nullable', 'date'],
-            'status' => ['sometimes', 'string', 'max:255'],
-            'duration_seconds' => ['sometimes', 'integer', 'min:1'],
-            'amount_dispensed' => ['nullable', 'numeric'],
-            'error_message' => ['nullable', 'string'],
+        return [
+            'feed_quantity' => ['sometimes', 'numeric', 'min:0.1', 'max:100'],
         ];
-
-        return $this->isMethod('put') || $this->isMethod('patch')
-            ? $this->partialRules($rules)
-            : $rules;
     }
 
     public function messages(): array
     {
         return [
-            'feeder_id.required' => 'The feeder ID is required.',
-            'feeder_id.exists' => 'The selected feeder does not exist.',
-            'hog_pen_id.required' => 'The hog pen ID is required.',
-            'hog_pen_id.exists' => 'The selected hog pen does not exist.',
-            'scheduled_at.required' => 'The scheduled feed time is required.',
+            'feed_quantity.numeric' => 'Feed quantity must be a number.',
+            'feed_quantity.min' => 'Feed quantity must be at least 0.1.',
+            'feed_quantity.max' => 'Feed quantity cannot exceed 100.',
         ];
-    }
-
-    private function partialRules(array $rules): array
-    {
-        foreach ($rules as $field => $fieldRules) {
-            array_unshift($fieldRules, 'sometimes');
-            $rules[$field] = $fieldRules;
-        }
-
-        return $rules;
     }
 }

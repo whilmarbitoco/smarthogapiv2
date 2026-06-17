@@ -31,12 +31,56 @@ class FeedingScheduleRequest extends FormRequest
             'custom_days.*' => ['string'],
             'is_active' => ['sometimes', 'boolean'],
             'feeding_times' => ['nullable', 'array'],
+            'feeding_times.*' => ['string'],
             'daily_feeding_count' => ['sometimes', 'integer', 'min:1'],
         ];
 
         return $this->isMethod('put') || $this->isMethod('patch')
             ? $this->partialRules($rules)
             : $rules;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->merge([
+            'feeding_times' => $this->normalizeFeedingTimes($this->input('feeding_times')),
+        ]);
+    }
+
+    /**
+     * Normalize feeding times to 24-hour H:i format.
+     * Accepts "12:00 PM", "09:41 AM", "14:30", "14:30:00", etc.
+     *
+     * @param  mixed  $times
+     * @return list<string>|null
+     */
+    private function normalizeFeedingTimes(mixed $times): ?array
+    {
+        if (! is_array($times) || $times === []) {
+            return null;
+        }
+
+        $normalized = [];
+
+        foreach ($times as $time) {
+            $time = trim((string) $time);
+
+            if ($time === '') {
+                continue;
+            }
+
+            // Try H:i:s first, then H:i, then fallback for AM/PM
+            foreach (['H:i:s', 'H:i', 'g:i A', 'g:iA', 'h:i A', 'h:iA', 'G:i'] as $format) {
+                $parsed = \DateTime::createFromFormat($format, $time);
+
+                if ($parsed !== false) {
+                    $normalized[] = $parsed->format('H:i');
+                    break;
+                }
+            }
+        }
+
+        return array_values(array_unique($normalized)) ?: null;
     }
 
     public function messages(): array

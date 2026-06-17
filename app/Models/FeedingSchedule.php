@@ -39,6 +39,43 @@ class FeedingSchedule extends Model
         'last_dispatched_at' => 'datetime',
     ];
 
+    /**
+     * Get normalized feeding times in 24-hour H:i format.
+     *
+     * @return list<string>
+     */
+    public function getNormalizedFeedingTimesAttribute(): array
+    {
+        $times = $this->feeding_times ?: [];
+
+        return collect($times)
+            ->filter()
+            ->map(function (mixed $time): ?string {
+                $time = trim((string) $time);
+
+                if ($time === '') {
+                    return null;
+                }
+
+                if (preg_match('/^\d{2}:\d{2}$/', $time)) {
+                    return $time;
+                }
+
+                foreach (['H:i:s', 'g:i A', 'g:iA', 'h:i A', 'h:iA', 'G:i'] as $format) {
+                    $parsed = \DateTime::createFromFormat($format, $time);
+                    if ($parsed !== false) {
+                        return $parsed->format('H:i');
+                    }
+                }
+
+                return null;
+            })
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     public function hogPen(): BelongsTo
     {
         return $this->belongsTo(HogPens::class, 'hog_pen_id');
