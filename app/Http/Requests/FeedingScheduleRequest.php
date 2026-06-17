@@ -21,7 +21,8 @@ class FeedingScheduleRequest extends FormRequest
     {
         $rules = [
             'hog_pen_id' => ['required', 'exists:hog_pens,id'],
-            'time' => ['required', 'date'],
+            'feeding_times' => ['required', 'array', 'min:1'],
+            'feeding_times.*' => ['required', 'date_format:H:i'],
             'feed_amount' => ['required', 'numeric'],
             'feed_type' => ['nullable', 'string', 'max:255'],
             'breed' => ['required', 'string', Rule::in(HogBreed::values())],

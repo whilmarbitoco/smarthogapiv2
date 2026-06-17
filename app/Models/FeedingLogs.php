@@ -14,6 +14,7 @@ class FeedingLogs extends Model
     protected $table = 'feeding_logs';
 
     protected $fillable = [
+        'execution_key',
         'feeder_id',
         'feeding_schedule_id',
         'device_id',

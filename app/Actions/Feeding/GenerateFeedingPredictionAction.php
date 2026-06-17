@@ -13,7 +13,7 @@ use Illuminate\Support\Arr;
 
 class GenerateFeedingPredictionAction
 {
-    private const DEFAULT_FEEDING_TIMES = ['6:00 am', '12:00 pm', '18:00 pm'];
+    private const DEFAULT_FEEDING_TIMES = ['6:00 am', '12:00 pm', '6:00 pm'];
 
     public function __construct(private PredictionClient $predictionClient) {}
 

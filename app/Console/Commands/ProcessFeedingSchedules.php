@@ -26,7 +26,13 @@ class ProcessFeedingSchedules extends Command
             ->with('hogPen.farm')
             ->chunkById(100, function ($schedules) use ($now, $windowStart, $date, &$dispatched): void {
                 foreach ($schedules as $schedule) {
+<<<<<<< HEAD
                     foreach ($this->dueFeedingTimes($schedule, $now, $windowStart) as $feedingTime) {
+=======
+                    $dueFeedingTimes = $this->dueFeedingTimes($schedule, $now);
+
+                    foreach ($dueFeedingTimes as $feedingTime) {
+>>>>>>> ec51521 (test schedule)
                         if ($this->alreadyExecuted($schedule->id, $date, $feedingTime)) {
                             Log::channel('feeding')->info('Scheduled feeding skipped — already succeeded.', [
                                 'schedule_id' => $schedule->id,
@@ -37,7 +43,15 @@ class ProcessFeedingSchedules extends Command
                             continue;
                         }
 
+<<<<<<< HEAD
                         Log::channel('feeding')->info('Dispatching scheduled feeding.', [
+=======
+                        ExecuteFeedingJob::dispatch($schedule->id, $date, $feedingTime);
+
+                        $dispatched++;
+
+                        Log::channel('feeding')->info('Scheduled feeding job dispatched.', [
+>>>>>>> ec51521 (test schedule)
                             'schedule_id' => $schedule->id,
                             'feeding_date' => $date,
                             'feeding_time' => $feedingTime,
@@ -49,6 +63,12 @@ class ProcessFeedingSchedules extends Command
                         $schedule->forceFill(['last_dispatched_at' => now()])->save();
 
                         $dispatched++;
+                    }
+
+                    if ($dueFeedingTimes !== []) {
+                        $schedule->forceFill([
+                            'last_dispatched_at' => $now,
+                        ])->save();
                     }
                 }
             });
@@ -67,10 +87,24 @@ class ProcessFeedingSchedules extends Command
             return [];
         }
 
-        $currentTime = $now->format('H:i');
+        $lastDispatched = $schedule->last_dispatched_at
+            ? Carbon::parse($schedule->last_dispatched_at)
+            : $now->copy()->startOfDay();
 
         return collect($this->scheduledTimes($schedule))
+<<<<<<< HEAD
             ->filter(fn (string $time): bool => $time >= $windowStart && $time <= $currentTime)
+=======
+            ->filter(function (string $time) use ($schedule, $now, $lastDispatched) {
+
+                $runAt = Carbon::createFromFormat(
+                    'Y-m-d H:i',
+                    $now->toDateString() . ' ' . $time
+                );
+
+                return $runAt->gt($lastDispatched) && $runAt->lte($now);
+            })
+>>>>>>> ec51521 (test schedule)
             ->values()
             ->all();
     }
@@ -136,11 +170,30 @@ class ProcessFeedingSchedules extends Command
 
     private function alreadyExecuted(int $scheduleId, string $date, string $feedingTime): bool
     {
+        $executionKey = hash('sha256', "{$scheduleId}|{$date}|{$feedingTime}");
+        $normalizedTime = Carbon::parse($feedingTime)->format('H:i:s');
+
         return FeedingLogs::query()
+<<<<<<< HEAD
             ->where('feeding_schedule_id', $scheduleId)
             ->whereDate('feeding_date', $date)
             ->where('feeding_time', $feedingTime)
             ->where('status', 'success')
+=======
+            ->where(function ($query) use ($executionKey, $scheduleId, $date, $feedingTime, $normalizedTime): void {
+                $query->where('execution_key', $executionKey)
+                    ->orWhere(function ($legacyQuery) use ($scheduleId, $date, $feedingTime, $normalizedTime): void {
+                        $legacyQuery
+                            ->where('feeding_schedule_id', $scheduleId)
+                            ->whereRaw('DATE(feeding_date) = ?', [$date])
+                            ->where(function ($timeQuery) use ($feedingTime, $normalizedTime): void {
+                                $timeQuery
+                                    ->whereRaw('feeding_time = ?', [$feedingTime])
+                                    ->orWhereRaw('feeding_time = ?', [$normalizedTime]);
+                            });
+                    });
+            })
+>>>>>>> ec51521 (test schedule)
             ->exists();
     }
 }

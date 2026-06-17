@@ -66,24 +66,14 @@ class ExecuteFeedingJob implements ShouldQueue
                 throw new RuntimeException('Feeding device is offline.');
             }
 
-            DB::transaction(function () use ($schedule, $feeder, $device, $deviceCommandService): void {
-                $commandResult = $deviceCommandService->sendFeedCommand((string) $device->id, (float) $schedule->feed_amount);
+            $this->upsertActivity($schedule, $feeder, $device, 'processing', null);
 
-                $this->upsertActivity($schedule, $feeder, $device, 'success', null);
-                $this->updateAnalytics($schedule);
-                $this->storeNotification($schedule, 'Scheduled feeding completed successfully', 'info', 'resolved');
+            $commandResult = $deviceCommandService->sendFeedCommand(
+                (string) $device->id,
+                (float) $schedule->feed_amount
+            );
 
-                Log::channel('feeding')->info('Scheduled feeding completed successfully.', [
-                    'schedule_id' => $schedule->id,
-                    'device_id' => $device->id,
-                    'feeding_date' => $this->feedingDate,
-                    'feeding_time' => $this->feedingTime,
-                    'provider' => $commandResult['provider'],
-                    'command_id' => $commandResult['command_id'],
-                    'execution_time' => now()->toISOString(),
-                    'result' => 'success',
-                ]);
-            });
+            $this->finalizeSuccess($schedule, $feeder, $device, $commandResult);
         } catch (Throwable $exception) {
             if ($feeder) {
                 $this->recordFailure($schedule, $feeder, $device, $exception);
@@ -117,11 +107,56 @@ class ExecuteFeedingJob implements ShouldQueue
             ?? $schedule->hogPen?->feeders->first();
     }
 
-    private function recordFailure(FeedingSchedule $schedule, Feeders $feeder, ?IotDevices $device, Throwable $exception): void
-    {
+    private function finalizeSuccess(
+        FeedingSchedule $schedule,
+        Feeders $feeder,
+        ?IotDevices $device,
+        array $commandResult,
+    ): void {
+        DB::transaction(function () use ($schedule, $feeder, $device, $commandResult): void {
+            $this->upsertActivity($schedule, $feeder, $device, 'success', null);
+            $this->updateAnalytics($schedule);
+            $this->storeNotification(
+                $schedule,
+                'Scheduled feeding completed successfully',
+                'info',
+                'resolved'
+            );
+        });
+
+        Log::channel('feeding')->info('Scheduled feeding completed successfully.', [
+            'schedule_id' => $schedule->id,
+            'device_id' => $device?->id,
+            'feeding_date' => $this->feedingDate,
+            'feeding_time' => $this->feedingTime,
+            'provider' => $commandResult['provider'] ?? null,
+            'command_id' => $commandResult['command_id'] ?? null,
+            'execution_time' => now()->toISOString(),
+            'result' => 'success',
+        ]);
+    }
+
+    private function recordFailure(
+        FeedingSchedule $schedule,
+        Feeders $feeder,
+        ?IotDevices $device,
+        Throwable $exception
+    ): void {
         DB::transaction(function () use ($schedule, $feeder, $device, $exception): void {
-            $this->upsertActivity($schedule, $feeder, $device, 'failed', $exception->getMessage());
-            $this->storeNotification($schedule, 'Scheduled feeding failed', 'high', 'active');
+            $this->upsertActivity(
+                $schedule,
+                $feeder,
+                $device,
+                'failed',
+                $exception->getMessage()
+            );
+
+            $this->storeNotification(
+                $schedule,
+                'Scheduled feeding failed',
+                'high',
+                'active'
+            );
         });
 
         Log::channel('feeding')->error('Scheduled feeding failed.', [
@@ -129,8 +164,6 @@ class ExecuteFeedingJob implements ShouldQueue
             'device_id' => $device?->id,
             'feeding_date' => $this->feedingDate,
             'feeding_time' => $this->feedingTime,
-            'execution_time' => now()->toISOString(),
-            'result' => 'failed',
             'error' => $exception->getMessage(),
         ]);
     }
@@ -142,19 +175,30 @@ class ExecuteFeedingJob implements ShouldQueue
         string $status,
         ?string $errorMessage,
     ): void {
+        $executionKey = $this->executionKey();
+        $existing = FeedingLogs::query()
+            ->where('execution_key', $executionKey)
+            ->first();
+
+        if ($existing && $existing->status === 'success' && $status !== 'success') {
+            return;
+        }
+
         FeedingLogs::query()->updateOrCreate([
-            'feeding_schedule_id' => $schedule->id,
-            'feeding_date' => $this->feedingDate,
-            'feeding_time' => $this->feedingTime,
+            'execution_key' => $executionKey,
         ], [
+            'feeding_schedule_id' => $schedule->id,
             'feeder_id' => $feeder->id,
             'device_id' => $device?->id,
             'pen_id' => $schedule->hog_pen_id,
             'feed_amount_given' => $schedule->feed_amount,
+            'feeding_date' => $this->feedingDate,
+            'feeding_time' => $this->feedingTime,
             'status' => $status,
             'trigger_source' => 'scheduled',
             'triggered' => 'scheduled',
             'error_message' => $errorMessage,
+            'execution_key' => $executionKey,
         ]);
     }
 
@@ -194,7 +238,7 @@ class ExecuteFeedingJob implements ShouldQueue
             ->where('hog_pen_id', $hogPen->id)
             ->where('type', 'scheduled_feeding')
             ->where('message', $message)
-            ->whereDate('created_at', now()->toDateString())
+            ->whereDate('created_at', $this->feedingDate)
             ->exists();
 
         if ($existing) {
@@ -211,8 +255,17 @@ class ExecuteFeedingJob implements ShouldQueue
         ]);
     }
 
+    private function executionKey(): string
+    {
+        return hash('sha256', implode('|', [
+            (string) $this->feedingScheduleId,
+            (string) $this->feedingDate,
+            (string) $this->feedingTime,
+        ]));
+    }
+
     private function overlapKey(): string
     {
-        return "feeding:{$this->feedingScheduleId}:{$this->feedingDate}:{$this->feedingTime}";
+        return $this->executionKey();
     }
 }
