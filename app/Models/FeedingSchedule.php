@@ -34,8 +34,7 @@ class FeedingSchedule extends Model
         'feed_amount' => 'decimal:2',
         'custom_days' => 'array',
         'is_active' => 'boolean',
-        'feeding_times' => 'nullable|array',
-        'feeding_times.*' => 'date_format:H:i',
+        'feeding_times' => 'array',
         'daily_feeding_count' => 'integer',
         'last_dispatched_at' => 'datetime',
     ];
