@@ -55,6 +55,7 @@ return [
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', (string) env('LOG_STACK', 'single')),
+            'channels' => ['syslog'],
             'ignore_exceptions' => false,
         ],
 

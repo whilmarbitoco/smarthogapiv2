@@ -67,6 +67,7 @@ trait HandlesCrud
         $model = $this->modelClass()::query()->create($data)->load($this->relationships());
 
         return ApiResponse::created($this->resource($model), $this->resourceName().' created successfully');
+        Log::debug('Created new '.$this->resourceName().': '.$model->id);
     }
 
     protected function crudShow(Model $model): JsonResponse
