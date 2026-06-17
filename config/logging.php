@@ -75,10 +75,14 @@ return [
         ],
 
         'feeding' => [
-            'driver' => 'single',
-            'path' => storage_path('logs/feeding.log'),
+            'driver' => 'monolog',
             'level' => env('LOG_LEVEL', 'debug'),
-            'replace_placeholders' => true,
+            'handler' => StreamHandler::class,
+            'handler_with' => [
+                'stream' => 'php://stderr',
+            ],
+            'formatter' => env('LOG_STDERR_FORMATTER'),
+            'processors' => [PsrLogMessageProcessor::class],
         ],
 
         'slack' => [

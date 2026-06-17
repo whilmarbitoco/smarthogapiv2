@@ -22,7 +22,7 @@ class FeedingScheduleRequest extends FormRequest
         $rules = [
             'hog_pen_id' => ['required', 'exists:hog_pens,id'],
             'feeding_times' => ['required', 'array', 'min:1'],
-            'feeding_times.*' => ['required', 'date_format:H:i'],
+            'feeding_times.*' => ['required', 'string'],
             'feed_amount' => ['required', 'numeric'],
             'feed_type' => ['nullable', 'string', 'max:255'],
             'breed' => ['required', 'string', Rule::in(HogBreed::values())],
@@ -31,8 +31,6 @@ class FeedingScheduleRequest extends FormRequest
             'custom_days' => ['nullable', 'array'],
             'custom_days.*' => ['string'],
             'is_active' => ['sometimes', 'boolean'],
-            'feeding_times' => ['nullable', 'array'],
-            'feeding_times.*' => ['string'],
             'daily_feeding_count' => ['sometimes', 'integer', 'min:1'],
         ];
 
@@ -50,6 +48,7 @@ class FeedingScheduleRequest extends FormRequest
 
         $this->merge([
             'feeding_times' => $normalized,
+            'time' => $this->input('time') ?? now()->toDateTimeString(),
         ]);
     }
 
