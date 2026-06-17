@@ -12,7 +12,6 @@ use Illuminate\Support\Facades\Log;
 class ProcessFeedingSchedules extends Command
 {
     protected $signature = 'feeding:process-schedules';
-
     protected $description = 'Dispatch due automated feeding schedules.';
 
     public function handle(): int
@@ -21,15 +20,32 @@ class ProcessFeedingSchedules extends Command
         $date = $now->toDateString();
         $dispatched = 0;
 
+        $this->info("=== FEEDING SCHEDULER START === now={$now->toDateTimeString()} date={$date}");
+
+        $totalSchedules = FeedingSchedule::query()->where('is_active', true)->count();
+        $this->info("Active schedules in DB: {$totalSchedules}");
+
         FeedingSchedule::query()
             ->where('is_active', true)
             ->with('hogPen.farm')
             ->chunkById(100, function ($schedules) use ($now, $date, &$dispatched): void {
                 foreach ($schedules as $schedule) {
+                    $rawTimes = $schedule->feeding_times ?: [];
+                    $normalizedTimes = $this->scheduledTimes($schedule);
+                    $runsToday = $this->runsToday($schedule, $now);
+
+                    $this->info("Schedule #{$schedule->id}: raw=" . json_encode($rawTimes) . " normalized=" . json_encode($normalizedTimes) . " runsToday=" . ($runsToday ? 'yes' : 'no') . " frequency=" . ($schedule->frequency ?? 'everyday'));
+
+                    if (! $runsToday) {
+                        continue;
+                    }
+
                     $dueFeedingTimes = $this->dueFeedingTimes($schedule, $now);
+                    $this->info("Schedule #{$schedule->id}: dueTimes=" . json_encode($dueFeedingTimes));
 
                     foreach ($dueFeedingTimes as $feedingTime) {
                         if ($this->alreadyExecuted($schedule->id, $date, $feedingTime)) {
+                            $this->info("Schedule #{$schedule->id} @ {$feedingTime}: SKIP (already succeeded)");
                             Log::channel('feeding')->info('Scheduled feeding skipped because activity already exists.', [
                                 'schedule_id' => $schedule->id,
                                 'feeding_date' => $date,
@@ -39,16 +55,17 @@ class ProcessFeedingSchedules extends Command
                             continue;
                         }
 
-                        ExecuteFeedingJob::dispatch($schedule->id, $date, $feedingTime);
-
-                        $dispatched++;
-
+                        $this->info("Schedule #{$schedule->id} @ {$feedingTime}: DISPATCHING");
                         Log::channel('feeding')->info('Scheduled feeding job dispatched.', [
                             'schedule_id' => $schedule->id,
                             'feeding_date' => $date,
                             'feeding_time' => $feedingTime,
                             'execution_time' => now()->toISOString(),
                         ]);
+
+                        ExecuteFeedingJob::dispatch($schedule->id, $date, $feedingTime);
+
+                        $dispatched++;
                     }
 
                     if ($dueFeedingTimes !== []) {
@@ -59,7 +76,7 @@ class ProcessFeedingSchedules extends Command
                 }
             });
 
-        $this->info("Dispatched {$dispatched} feeding job(s).");
+        $this->info("=== FEEDING SCHEDULER END === dispatched={$dispatched}");
 
         return self::SUCCESS;
     }
@@ -100,8 +117,29 @@ class ProcessFeedingSchedules extends Command
         return collect($times)
             ->filter()
             ->map(function (mixed $time): ?string {
+                $time = trim((string) $time);
+
+                if ($time === '') {
+                    return null;
+                }
+
+                // Already in H:i format (e.g. "14:30")
+                if (preg_match('/^\d{2}:\d{2}$/', $time)) {
+                    return $time;
+                }
+
+                // Try parsing other formats
+                foreach (['H:i:s', 'g:i A', 'g:iA', 'h:i A', 'h:iA', 'G:i'] as $format) {
+                    $parsed = \DateTime::createFromFormat($format, $time);
+
+                    if ($parsed !== false) {
+                        return $parsed->format('H:i');
+                    }
+                }
+
+                // Fallback to Carbon for anything else
                 try {
-                    return Carbon::parse((string) $time)->format('H:i');
+                    return Carbon::parse($time)->format('H:i');
                 } catch (\Throwable) {
                     return null;
                 }

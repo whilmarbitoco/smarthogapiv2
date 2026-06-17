@@ -43,8 +43,13 @@ class FeedingScheduleRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        $rawTimes = $this->input('feeding_times');
+        $normalized = $this->normalizeFeedingTimes($rawTimes);
+
+        \Log::channel('feeding')->info('FeedingScheduleRequest: raw feeding_times=' . json_encode($rawTimes) . ' normalized=' . json_encode($normalized));
+
         $this->merge([
-            'feeding_times' => $this->normalizeFeedingTimes($this->input('feeding_times')),
+            'feeding_times' => $normalized,
         ]);
     }
 

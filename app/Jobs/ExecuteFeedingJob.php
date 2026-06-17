@@ -46,35 +46,45 @@ class ExecuteFeedingJob implements ShouldQueue
 
     public function handle(DeviceCommandService $deviceCommandService): void
     {
+        $this->info("ExecuteFeedingJob START: schedule_id={$this->feedingScheduleId} date={$this->feedingDate} time={$this->feedingTime}");
+
         $schedule = FeedingSchedule::query()
             ->with(['hogPen.farm', 'hogPen.feeders.iotDevice'])
             ->find($this->feedingScheduleId);
 
         if (! $schedule || ! $schedule->is_active) {
+            $this->info("ExecuteFeedingJob: schedule not found or inactive, skipping");
             return;
         }
 
         $feeder = $this->resolveFeeder($schedule);
         $device = $feeder?->iotDevice;
 
+        $this->info("ExecuteFeedingJob: feeder_id=" . ($feeder?->id ?? 'null') . " device_id=" . ($device?->id ?? 'null'));
+
         try {
             if (! $feeder || ! $device) {
+                $this->error("ExecuteFeedingJob: No feeder/device for schedule #{$this->feedingScheduleId}");
                 throw new RuntimeException('No feeder device is associated with this feeding schedule.');
             }
 
+            $this->info("ExecuteFeedingJob: device status={$device->status} isOnline=" . ($device->isOnline() ? 'yes' : 'no'));
+
             if (! $device->isOnline()) {
+                $this->error("ExecuteFeedingJob: Device #{$device->id} is offline");
                 throw new RuntimeException('Feeding device is offline.');
             }
 
-            $this->upsertActivity($schedule, $feeder, $device, 'processing', null);
-
+            $this->info("ExecuteFeedingJob: sending feed command to device #{$device->id}, amount={$schedule->feed_amount}");
             $commandResult = $deviceCommandService->sendFeedCommand(
                 (string) $device->id,
                 (float) $schedule->feed_amount
             );
+            $this->info("ExecuteFeedingJob: command OK, provider={$commandResult['provider']} command_id={$commandResult['command_id']}");
 
             $this->finalizeSuccess($schedule, $feeder, $device, $commandResult);
         } catch (Throwable $exception) {
+            $this->error("ExecuteFeedingJob FAILED: " . $exception->getMessage());
             if ($feeder) {
                 $this->recordFailure($schedule, $feeder, $device, $exception);
             }
@@ -85,6 +95,8 @@ class ExecuteFeedingJob implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
+        $this->error("ExecuteFeedingJob FAILED (retries exhausted): schedule_id={$this->feedingScheduleId} error=" . $exception->getMessage());
+
         $schedule = FeedingSchedule::query()->with(['hogPen.farm', 'hogPen.feeders.iotDevice'])->find($this->feedingScheduleId);
 
         if (! $schedule) {

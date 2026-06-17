@@ -24,8 +24,11 @@ class DeviceCommandService
             ->first();
 
         if (! $device) {
+            \Log::channel('feeding')->error("DeviceCommandService: device [{$deviceId}] not found");
             throw new RuntimeException("Device [{$deviceId}] was not found.");
         }
+
+        \Log::channel('feeding')->info("DeviceCommandService: found device #{$device->id}, provider={$device->external_provider}, status={$device->status}");
 
         $payload = [
             'device_id' => (string) $device->id,
@@ -35,6 +38,8 @@ class DeviceCommandService
         ];
 
         $provider = $this->resolveBestAvailableProvider($device, $payload);
+
+        \Log::channel('feeding')->info("DeviceCommandService: using provider={$provider} for device #{$device->id}");
 
         $command = DeviceCommands::query()->create([
             'iot_device_id' => $device->id,
@@ -52,11 +57,15 @@ class DeviceCommandService
                 'executed_at' => now(),
             ]);
 
+            \Log::channel('feeding')->info("DeviceFeedCommand: command completed, command_id={$command->id}");
+
             return [
                 'provider' => $provider,
                 'command_id' => $command->id,
             ];
         } catch (\Throwable $exception) {
+            \Log::channel('feeding')->error("DeviceCommandService: command failed for device #{$device->id}: " . $exception->getMessage());
+
             $command->update([
                 'payload' => array_merge($payload, [
                     'error' => $exception->getMessage(),
