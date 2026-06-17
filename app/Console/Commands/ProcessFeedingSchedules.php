@@ -80,16 +80,32 @@ class ProcessFeedingSchedules extends Command
      */
     private function scheduledTimes(FeedingSchedule $schedule): array
     {
-        $times = $schedule->feeding_times ?: [$schedule->time?->format('H:i')];
+        $times = $schedule->feeding_times ?: [];
 
         return collect($times)
             ->filter()
             ->map(function (mixed $time): ?string {
-                try {
-                    return Carbon::parse((string) $time)->format('H:i');
-                } catch (\Throwable) {
+                $time = trim((string) $time);
+
+                if ($time === '') {
                     return null;
                 }
+
+                // Already in H:i format (e.g. "14:30")
+                if (preg_match('/^\d{2}:\d{2}$/', $time)) {
+                    return $time;
+                }
+
+                // Try parsing other formats
+                foreach (['H:i:s', 'g:i A', 'g:iA', 'h:i A', 'h:iA', 'G:i'] as $format) {
+                    $parsed = \DateTime::createFromFormat($format, $time);
+
+                    if ($parsed !== false) {
+                        return $parsed->format('H:i');
+                    }
+                }
+
+                return null;
             })
             ->filter()
             ->unique()
